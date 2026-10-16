@@ -34,12 +34,21 @@ viewer.addEventListener("error", () => {
   brand.classList.remove("model-ready");
   syncMotion();
 });
-reduced.addEventListener("change", syncMotion);
+reduced.addEventListener("change", () => {
+  syncMotion();
+  if (!reduced.matches) loadViewer();
+});
 document.addEventListener("visibilitychange", syncMotion);
 syncMotion();
-try {
-  await import("./assets/vendor/model-viewer.min.js");
-} catch {
-  brand.classList.remove("model-ready");
-  syncMotion();
+// Keep the static mark and avoid the renderer/model downloads when motion is reduced.
+let viewerLoad;
+function loadViewer() {
+  if (!viewerLoad) {
+    viewerLoad = import("./assets/vendor/model-viewer.min.js").catch(() => {
+      brand.classList.remove("model-ready");
+      syncMotion();
+    });
+  }
+  return viewerLoad;
 }
+if (!reduced.matches) loadViewer();

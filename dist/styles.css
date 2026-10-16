@@ -138,6 +138,8 @@ model-viewer {
   font-size: 8px;
   letter-spacing: 1px;
   color: #666;
+  min-height: 28px;
+  min-width: 112px;
   padding: 6px 12px;
 }
 #motion[hidden] {
@@ -145,6 +147,7 @@ model-viewer {
 }
 #bag {
   justify-self: end;
+  white-space: nowrap;
   min-height: 44px;
   font-size: 11px;
   padding: 12px 0 12px 20px;
@@ -167,15 +170,20 @@ model-viewer {
   inset: 0;
   gap: 3px;
 }
+.hero-images picture {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+}
 .hero-images img {
   width: 100%;
   height: 100%;
   min-height: 0;
   object-fit: cover;
-  object-position: 50% 43%;
+  object-position: 50% 0%;
 }
 .hero-images img:first-child {
-  object-position: 50% 45%;
+  object-position: 50% 0%;
 }
 .hero-shade {
   position: absolute;
@@ -644,11 +652,6 @@ body:has(dialog[open]) {
   opacity: 1;
   transform: translate(-50%, 0);
 }
-@media (min-width: 1600px) {
-  .hero-images img {
-    object-position: 50% 40%;
-  }
-}
 @media (max-width: 760px) {
   html {
     scroll-padding-top: 120px;
@@ -671,7 +674,8 @@ body:has(dialog[open]) {
   }
   #motion {
     bottom: 3px;
-    font-size: 7px;
+    font-size: 8px;
+    bottom: 0;
   }
   #menu-toggle {
     display: flex;
@@ -719,7 +723,7 @@ body:has(dialog[open]) {
   .hero-images img:first-child {
     object-position: 50% 40%;
   }
-  .hero-images img:nth-child(2) {
+  .hero-images .hero-secondary {
     display: none;
   }
   .hero-top {
@@ -797,16 +801,19 @@ body:has(dialog[open]) {
     gap: 24px 14px;
   }
   .editorial-grid figure:nth-child(2) {
-    margin-top: 50px;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: min(100%, 460px);
+    justify-self: center;
+    margin-top: 8px;
   }
   .editorial-grid figure:nth-child(3) {
-    grid-column: 1/-1;
-    margin-top: 0;
-    width: 75%;
-    justify-self: center;
+    grid-column: 2;
+    grid-row: 1;
+    margin-top: 35px;
   }
   figcaption {
-    font-size: 7px;
+    font-size: 8px;
     display: block;
     padding-top: 12px;
   }
@@ -814,9 +821,25 @@ body:has(dialog[open]) {
     display: block;
     margin-top: 8px;
     min-height: 44px;
+    min-width: 150px;
+    font-size: 11px;
+    padding: 10px 14px;
+    border: 1px solid #777;
+    text-decoration: none;
+  }
+  .video-figure figcaption {
+    font-size: 9px;
+    display: flex;
+    align-items: center;
+  }
+  .video-figure figcaption button {
+    margin-top: 0;
   }
   .closing {
     padding: 65px 15px;
+  }
+  .closing h2 {
+    font-size: clamp(42px, 11vw, 84px);
   }
   footer {
     flex-wrap: wrap;

@@ -35,7 +35,7 @@ Se descargó como `dist/assets/offcode-original.glb`, conservando su geometría 
 
 El visor gira el monograma centrado alrededor del eje vertical, sin órbita ni borde circular. Se usa la velocidad declarada en el HTML de referencia: **60°/s (6 segundos por vuelta)**. Esto reproduce su configuración; no supone una comparación visual cuadro a cuadro con una grabación animada de la referencia. La iluminación es neutral, sin sombra de suelo; el material original recibe rugosidad 0.32 y metalicidad 0.85 para moderar los reflejos.
 
-El botón del encabezado pausa y reanuda el giro. Con `prefers-reduced-motion: reduce` se muestra la silueta estática. Si falla el módulo, WebGL o la carga del modelo, permanece la alternativa estática. El movimiento se detiene al ocultar la pestaña.
+El botón del encabezado pausa y reanuda el giro. Con `prefers-reduced-motion: reduce` se muestra la silueta estática. Si falla el módulo, WebGL o la carga del modelo, permanece la alternativa estática. El movimiento se detiene al ocultar la pestaña. Si el usuario llega con movimiento reducido, no se descarga el visor 3D ni el GLB; al desactivar esa preferencia se carga el visor.
 
 ## Fotografías y video
 
@@ -52,7 +52,7 @@ Recursos empleados:
 
 El clip se inspeccionó mediante fotogramas distribuidos por su duración y reproducción en Chrome. Es una toma de campaña de **3.53 s, 720 × 960, sin pista de audio**. Se presenta en proporción 3:4, con reproducción por acción del usuario, controles nativos, botón adicional reproducir/pausar, `muted` y `playsinline`. Se pausa al salir de pantalla o al ocultar la pestaña. No hay autoplay de video.
 
-Las fotos de la portada cargan de inmediato; las imágenes de producto y editoriales usan carga diferida. Las capturas antiguas permanecen en assets para conservar los recursos previos, pero la página ya no las referencia.
+La portada incluye variantes WebP de 640 y 1170 px con selección por ancho de pantalla y respaldo JPEG. La segunda fotografía no se descarga en móvil. Las fotos visibles de la portada cargan de inmediato; las imágenes de producto y editoriales usan carga diferida. Las capturas antiguas permanecen en assets para conservar los recursos previos, pero la página ya no las referencia.
 
 ## Verificación realizada
 
@@ -94,3 +94,10 @@ git push origin HEAD
 **Si Render ya tiene despliegue automático conectado a la rama actual, ese push puede publicar el sitio.** Revisa esa configuración antes de ejecutarlo.
 
 Render conserva estos valores: tipo Static Site, Build Command `echo Static site ready`, Publish Directory `dist`. No agregues comandos npm. También puede usarse el `render.yaml` existente como Blueprint. Para revisar sin desplegar, mantén los cambios localmente o súbelos a una rama sin despliegue automático.
+
+## Última pasada de acabado
+
+- Encuadre superior de las dos fotografías de portada para conservar completas las cabezas en escritorio; se mantiene el encuadre específico de móvil.
+- Video de campaña a todo el ancho útil en móvil, después de las dos fotos editoriales, con botón de al menos 44 px de alto.
+- Portada WebP: frente 640 px ≈ 57 KB / 1170 px ≈ 152 KB; espalda ≈ 46 KB / 97 KB. Los JPEG originales se conservan como alternativa.
+- Revisión adicional en Chrome de escritorio y vistas móviles; reproducción y pausa verificadas de nuevo. No se midió rendimiento en una red móvil real ni se revisó en un teléfono físico.

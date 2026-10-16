@@ -65,18 +65,45 @@
     <main>
       <section class="hero" aria-labelledby="campaign-title">
         <div class="hero-images">
-          <img
-            src="assets/campaign-front.jpg"
-            alt="Modelo con sudadera LA AFRO × OFFCODE frente a un automóvil"
-            width="1170"
-            height="1560"
-            fetchpriority="high"
-          /><img
-            src="assets/campaign-back.jpg"
-            alt="Gráfico de la espalda de la sudadera en la campaña urbana"
-            width="1170"
-            height="1560"
-          />
+          <picture>
+            <source
+              type="image/webp"
+              srcset="
+                assets/campaign-front-640.webp   640w,
+                assets/campaign-front-1170.webp 1170w
+              "
+              sizes="(max-width: 760px) 100vw, 50vw"
+            />
+            <img
+              src="assets/campaign-front.jpg"
+              alt="Modelo con sudadera LA AFRO × OFFCODE frente a un automóvil"
+              width="1170"
+              height="1560"
+              fetchpriority="high"
+            />
+          </picture>
+          <picture class="hero-secondary">
+            <source
+              media="(min-width: 761px)"
+              type="image/webp"
+              srcset="
+                assets/campaign-back-640.webp   640w,
+                assets/campaign-back-1170.webp 1170w
+              "
+              sizes="50vw"
+            />
+            <source
+              media="(min-width: 761px)"
+              srcset="assets/campaign-back.jpg"
+            />
+            <img
+              src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+              alt="Gráfico de la espalda de la sudadera en la campaña urbana"
+              width="1170"
+              height="1560"
+              decoding="async"
+            />
+          </picture>
         </div>
         <div class="hero-shade"></div>
         <div class="hero-top">
@@ -231,7 +258,7 @@
               alt="Modelo OFFCODE sentado sobre un automóvil"
               loading="lazy"
             />
-            <figcaption>01 / EN SU ELEMENTO</figcaption>
+            <figcaption>EN SU ELEMENTO</figcaption>
           </figure>
           <figure class="video-figure">
             <video
@@ -251,7 +278,7 @@
               <a href="assets/campaign.mp4">Abrir clip de campaña</a>
             </video>
             <figcaption>
-              02 / EN MOVIMIENTO
+              EN MOVIMIENTO
               <button id="video-toggle" aria-controls="campaign-video">
                 Reproducir clip ▶
               </button>
@@ -265,7 +292,7 @@
               alt="Detalle del monograma Of sobre la sudadera negra"
               loading="lazy"
             />
-            <figcaption>03 / LA FIRMA</figcaption>
+            <figcaption>LA FIRMA</figcaption>
           </figure>
         </div>
       </section>
