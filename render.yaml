@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: offcode-demo
+    runtime: static
+    buildCommand: echo Static site ready
+    staticPublishPath: ./dist
