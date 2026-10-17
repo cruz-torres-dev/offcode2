@@ -597,3 +597,26 @@ test("Configuración incompleta y tarifas de sandbox bloqueadas para ventas en p
     /simuladas/,
   );
 });
+test("El pedido guarda la tarifa validada, el servicio y el estimado de FedEx; ignora el importe del navegador", async () => {
+  const mock = provider(),
+    app = await start(mock);
+  try {
+    const { id } = await createOrder(app);
+    const list = await app.call("/api/admin/orders");
+    const saved = list.data.orders.find((o) => o.id === id);
+    assert.equal(saved.shipping.carrier, "fedex");
+    assert.equal(saved.shipping.provider, "envia");
+    assert.equal(saved.shipping.service, "ground");
+    assert.equal(saved.shipping.quotedCents, 18520);
+    assert.equal(saved.shipping.deliveryEstimate, "Estimación ficticia");
+    assert.equal(saved.shipping.environment, "sandbox");
+    // The browser sent shippingCents: 1; only the server quote is stored.
+    assert.equal(saved.shippingCents, 18520);
+    assert.equal(saved.totalCents, 183520);
+    assert.equal(saved.carrier, "");
+    assert.equal(saved.tracking, "");
+    assert.equal(saved.status, "requested");
+  } finally {
+    await app.close();
+  }
+});

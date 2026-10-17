@@ -12,6 +12,7 @@ La landing VIP se retiró del sitio publicado. Sus fuentes están en `archive/vi
 - Servidor: copiar `.env.example` a `.env`, configurar la contraseña privada y ejecutar `npm start`. Node.js **24.14.x**, sin instalar paquetes ni compilar. SQLite viene incluido y emite un aviso experimental.
 - Flujo ficticio completo: `npm run preview:shipping`; abrir http://127.0.0.1:8013. Contraseña del panel de esta vista: **solo-pruebas-fedex-ficticias**. Datos en memoria, sin llamadas a Envia ni guías reales. Detener con Ctrl+C.
 - Pruebas: `npm test`.
+- Correo transaccional opcional: desactivado por defecto (`EMAIL_ENABLED=false`). Configuración, DNS y prueba controlada en [OPERACION.md](OPERACION.md#correo-transaccional-resend).
 - Ejercicio de carga exclusivamente local: `npm run check:load`; reporte en `qa/load-local.json`.
 
 Sigue [OPERACION.md](OPERACION.md) antes de habilitar ventas. El propietario puede configurar ENVIA_TOKEN directamente en las variables privadas del hosting; no necesita compartirlo por chat ni subirlo al repositorio.
@@ -20,14 +21,70 @@ Sigue [OPERACION.md](OPERACION.md) antes de habilitar ventas. El propietario pue
 
 - `dist/index.html`, `styles.css`, `app.js`, `logo.js`: tienda, campaña, galería, bolsa y monograma.
 - `dist/checkout.html` / `checkout.js`: dirección, consentimiento, cotización FedEx y solicitud.
-- `dist/admin.html` / `admin.js`: pedidos, transferencias, compra y conciliación de guías.
+- `dist/admin.html` / `admin.js`: panel con seis secciones (resumen, pedidos, productos, inventario, envíos y configuración).
+- `dist/admin.css`: tema oscuro editorial del panel; no afecta a la tienda ni a la configuración.
 - `server/server.mjs`: API, sesiones y persistencia SQLite.
+- `server/db.mjs`: esquema versionado y migraciones idempotentes de catálogo e inventario.
+- `server/catalog-store.mjs`: productos, variantes, inventario, reservas y pedidos en una transacción.
+- `server/catalog.mjs`: datos comerciales confirmados de la prenda, tallas contempladas y estructura de medidas.
+- `server/email.mjs` y `server/email-outbox.mjs`: transporte privado de Resend, plantillas y cola durable de notificaciones.
+- `scripts/email-smoke.mjs`: prueba de envío real, manual y opcional.
 - `server/envia.mjs`: estados, cotizaciones y guías FedEx mediante Envia.
 - `server/http-policy.mjs`: caché pública y reconocimiento del cliente detrás de Render.
-- `tests/`: integración, acceso, importes, estados, idempotencia, caché y prueba local de carga.
+- `tests/`: integración, acceso, importes, estados, catálogo, inventario, idempotencia, caché y prueba local de carga.
 - `.env.example`, `render.yaml`, `render-orders.yaml`: configuración local, estática y alternativa Node.
 - `archive/vip/`: respaldo de la landing anterior; no se publica.
 - `qa/`: capturas e informes de pruebas, fuera del sitio publicado.
+
+## Ficha de la prenda y guía de tallas (17 de octubre de 2026)
+
+La ficha publica solo datos comerciales confirmados: **hoodie oversize**, **negro**, **100% algodón**, **420 g/m²** y temporada **SS 2026**. El documento de confección del cliente es confidencial y no se copió al repositorio, a `dist/`, a Git ni al despliegue.
+
+El botón "Guía de tallas y medidas" abre un diálogo con las seis tallas contempladas (XS–XXL) y su disponibilidad real, que ahora sale del catálogo administrado: hoy S, M, L y XL; XS y XXL aparecen como "Por confirmar" y el servidor las rechaza, y una talla agotada se muestra como "Agotado". **No hay tabla de centímetros** porque el documento no incluye medidas y no se inventan. La estructura para añadirlas y publicar el tiempo de preparación sigue en `server/catalog.mjs`, sin tocar HTML ni CSS. Ver [OPERACION.md](OPERACION.md#ficha-de-la-prenda-y-guía-de-tallas).
+
+El envío sigue siendo exclusivamente FedEx a través de Envia: cotización filtrada por transportista, selección antes de confirmar, tarifa validada en el servidor y estimado de entrega solo si FedEx lo devuelve. El pedido guarda transportista, servicio, tarifa y estimado; el rastreo se guarda al generar una guía real. La consulta automática de seguimiento y cualquier promesa de plazo siguen pendientes de confirmar con la cuenta real.
+
+## Catálogo administrable e inventario (17 de octubre de 2026)
+
+El panel `/admin.html` tiene seis secciones —Resumen, Pedidos, Productos, Inventario, Envíos y Configuración— y muestra solo cifras reales del servidor. Envíos sigue operándose desde la tarjeta de cada pedido con la integración de Envia; Configuración enlaza a la pantalla privada existente, sin duplicarla.
+
+Los productos se crean, editan, publican, despublican y archivan desde el panel. Cada variante (talla + color) tiene un SKU único garantizado por la base de datos. Despublicar o archivar no borra nada: los pedidos anteriores conservan nombre, SKU y precio del momento de la compra.
+
+El inventario es por variante: `disponible = existencias físicas − reservadas`, con umbral de stock bajo configurable y registro de movimientos con actor, fecha y motivo obligatorio en las entradas y ajustes manuales. El control de stock se activa con el primer conteo real de cada talla; mientras no se configure, la tienda se comporta como antes y no se inventan existencias.
+
+Al crear un pedido el servidor valida variante, precio y stock, y reserva las unidades dentro de una transacción SQLite. Reservar no es cobrar ni descontar: el descuento ocurre una sola vez al marcar el pago, y cancelar libera la reserva. Dos compradores por la última unidad no pueden quedarse ambos con ella. La caducidad de reservas no está implementada y no se inventó un plazo.
+
+La tienda consume el catálogo administrado: solo se ofrecen las tallas con variante activa, las agotadas aparecen deshabilitadas con la leyenda "Agotado" y el precio sale del catálogo. La guía de tallas muestra la disponibilidad real y la bolsa se vuelve a validar en el servidor.
+
+Migraciones versionadas con `PRAGMA user_version`, idempotentes y transaccionales; la ruta de la base de datos no cambia. Detalle de tablas, estados, movimientos, límites y pasos de activación: [OPERACION.md](OPERACION.md#catálogo-administrable-inventario-y-migraciones).
+
+## Correo transaccional (17 de octubre de 2026)
+
+Integración opcional con Resend, desactivada por defecto y sin dependencias nuevas. Si falta configuración, la tienda, el checkout, el panel y Envia siguen funcionando igual y el servidor registra que los correos no están habilitados; no se simula ningún envío.
+
+Al recibir una solicitud se avisa al propietario (referencia y resumen mínimo) y se confirma la recepción al comprador si su dirección es válida. Al cambiar de estado se notifican solo transiciones confirmadas: instrucciones de transferencia sin datos bancarios, pago verificado, envío con el rastreo real, entrega y cancelación. Cada mensaje tiene versión HTML y texto plano en español, y nunca incluye CLABE, domicilio completo, teléfono ni datos inventados.
+
+La cola se guarda en `<DATABASE_PATH>.email-outbox/`, fuera de SQLite y excluida de Git. Un hash de pedido, estado y destinatario evita duplicados; los reintentos reutilizan la misma clave de idempotencia; un fallo o timeout queda como resultado incierto y el pedido no se pierde ni se duplica. El panel muestra el estado por correo y permite reintentar cuando es seguro. La clave de Resend nunca llega al navegador, a las respuestas ni a los registros.
+
+Guía completa de variables, verificación del dominio sin alterar los registros MX/SPF/DKIM existentes de Solucionix, configuración en Render y prueba controlada: [OPERACION.md](OPERACION.md#correo-transaccional-resend).
+
+## Movimiento de la tienda (17 de octubre de 2026)
+
+`dist/motion.js` y `dist/motion.css` añaden una entrada de unos 2 segundos, con el monograma original, fotografías y titular escalonados. Se ejecuta una vez por sesión de pestaña, sin bloquear la tienda; se omite en enlaces a secciones y al regresar con desplazamiento restaurado. No hay recursos nuevos de imagen ni dependencias. El pequeño desenfoque inicial se limita al monograma.
+
+Las secciones, galería y fotografías editoriales aparecen con IntersectionObserver y vuelven a animarse al entrar desde arriba o abajo. El contenido base siempre es visible: no necesita una clase JavaScript para mostrarse. Las animaciones nativas son temporales y se cancelan si un control recibe el foco. La portada desplaza sus capas como máximo 4 y 7 px; la foto plana de la prenda se inclina como máximo 3,5° por eje. Solo se actualiza con movimientos del ratón, agrupados por requestAnimationFrame, sin un bucle permanente ni listeners de scroll.
+
+Con movimiento reducido se eliminan estos efectos; con puntero táctil se desactivan parallax, inclinación y el zoom por hover. Los listeners se limpian en pagehide y se reconstruyen al restaurar desde la caché de navegación. El carrito, checkout, API, persistencia y modelo GLB existente conservan su implementación.
+
+Validación y capturas: [qa/motion.md](qa/motion.md). El helper opcional `node tests/preview-motion.mjs`, junto con `npm run preview:shipping`, permite inspeccionar un fotograma de entrada y simular preferencias reducidas, puntero táctil o ausencia de scripts de la tienda en http://127.0.0.1:8014/?qaMode=normal. Solo escucha en loopback, queda fuera de `dist/` y no modifica las preferencias del sistema. No es una prueba en un teléfono físico. Esta etapa es exclusivamente local, sin publicación.
+
+## Tema oscuro editorial (17 de octubre de 2026)
+
+La tienda pasa a un tema negro: fondo `#080808`, secciones alternas `#111111`, superficies elevadas `#181818`, texto principal `#F5F5F5` y secundario `#A6A6A6`, bordes `#303030`. El encabezado usa negro translúcido con desenfoque. Las fotografías de producto (frente, espalda, detalle, miniaturas y ampliación) conservan su fondo blanco para que la silueta se distinga; el monograma estático se invierte por CSS y el modelo GLB usa el acabado `silver` que `dist/logo.js` ya contemplaba.
+
+El cambio de vista de la galería añade una transición breve: la foto anterior se desvanece sobre la nueva una vez decodificada. Vive en `dist/motion.js` como observador del atributo `src` de `#gallery-main`; `dist/app.js` y la lógica comercial no cambian. La bolsa y la ampliación abren y cierran con una transición de opacidad y posición basada en `@starting-style`; en navegadores sin soporte abren al instante, como antes. Navegación, tallas, cantidad, miniaturas y botones ganan estados hover y active discretos. Todo lo anterior respeta el movimiento reducido y los punteros táctiles.
+
+Validación y capturas: [qa/dark-theme.md](qa/dark-theme.md).
 
 ## Monograma original
 
@@ -74,7 +131,7 @@ Esta versión utiliza SQLite y una instancia. Un servicio con disco no puede esc
 
 ## Verificación actual
 
-**21 pruebas automáticas aprobadas.** Incluyen pedidos, VIP archivado/API de datos conservada, FedEx exclusivo, bloqueo de compra duplicada, recuperación tras reinicio, raíz de tienda, caché pública, configuración cifrada, token oculto, cambio de contraseña, invalidación de tarifas, búsqueda de pedidos en todas las páginas y URL inicial automática de Render. No se realizaron pagos ni compras de guías reales.
+**47 pruebas automáticas aprobadas.** Incluyen pedidos, catálogo administrable, inventario y reservas, VIP archivado/API de datos conservada, FedEx exclusivo, bloqueo de compra duplicada, recuperación tras reinicio, raíz de tienda, caché pública, configuración cifrada, token oculto, cambio de contraseña, invalidación de tarifas, búsqueda de pedidos en todas las páginas y URL inicial automática de Render. No se realizaron pagos ni compras de guías reales.
 
 Prueba de carga local del 16 de octubre de 2026: 600 peticiones al catálogo y recursos con concurrencia 50, 120 solicitudes de pedido con concurrencia 20 y 120 reintentos. Cero respuestas de error y exactamente 120 pedidos únicos guardados. El reporte identifica tiempos y alcance. **Son solicitudes HTTP en loopback, no visitantes ni capacidad certificada de Render.** No incluye tiempos ni límites reales de Envia, CDN, conexión móvil o carga de renderizado 3D en teléfonos.
 

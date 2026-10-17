@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server/server.mjs",
     "test": "node --test tests/*.test.mjs",
+    "email:smoke": "node --env-file-if-exists=.env scripts/email-smoke.mjs",
     "preview:shipping": "node tests/preview-shipping.mjs",
     "check:load": "node tests/load-local.mjs"
   }

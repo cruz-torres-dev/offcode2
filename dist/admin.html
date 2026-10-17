@@ -4,9 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="robots" content="noindex,nofollow" />
-    <title>Pedidos — OFFCODE</title>
+    <title>Panel — OFFCODE</title>
     <link rel="icon" href="assets/monogram-static.png" />
     <link rel="stylesheet" href="operations.css" />
+    <link rel="stylesheet" href="admin.css" />
   </head>
   <body>
     <header>
@@ -18,7 +19,7 @@
       <section id="login">
         <p class="eyebrow">ACCESO PRIVADO</p>
         <h1>Detrás del código.</h1>
-        <p class="intro">Pedidos, transferencias y seguimiento de envíos.</p>
+        <p class="intro">Pedidos, productos, inventario y envíos.</p>
         <form id="login-form">
           <label
             >Contraseña de administración<input
@@ -31,64 +32,240 @@
           ><button class="primary">Entrar al panel →</button>
         </form>
         <p class="fine">
-          Solo el propietario debe tener acceso. Los pedidos se consultan en el
+          Solo el propietario debe tener acceso. Los datos se consultan en el
           servidor.
         </p>
       </section>
       <p id="admin-message" role="status" class="message"></p>
       <section id="dashboard" hidden>
-        <nav class="owner-nav" aria-label="Panel del propietario">
-          <a href="admin.html" aria-current="page">Pedidos y envíos</a
-          ><a href="settings.html">Configuración</a
+        <nav class="owner-nav" aria-label="Enlaces del propietario">
+          <a href="settings.html">Configuración del propietario</a
           ><a href="settings.html#account">Mi acceso</a
           ><a href="index.html">Ver tienda ↗</a>
         </nav>
         <div class="dashboard-head">
           <div>
             <p class="eyebrow">OPERACIÓN / OFFCODE</p>
-            <h1>Pedidos y envíos.</h1>
+            <h1 id="view-title">Resumen.</h1>
           </div>
           <button id="refresh">Actualizar ↻</button>
         </div>
-        <p class="intro">
-          Verifica cada transferencia en tu banco. Compra la guía desde este
-          panel después de confirmar el pago; registra el envío al entregar el
-          paquete a FedEx.
-        </p>
-        <p id="shipping-status" class="message" role="status"></p>
-        <div
-          id="overview"
-          class="overview"
-          aria-label="Resumen de todos los pedidos"
-        ></div>
-        <div class="filters">
-          <label
-            >Buscar en todos los pedidos<input
-              id="search"
-              type="search"
-              placeholder="Referencia o nombre" /></label
-          ><label
-            >Estado<select id="status-filter">
-              <option value="">Todos</option>
-              <option value="requested">Por confirmar</option>
-              <option value="awaiting_transfer">
-                Pendiente de transferencia
-              </option>
-              <option value="paid">Pago verificado</option>
-              <option value="shipped">Enviado</option>
-              <option value="delivered">Entregado</option>
-              <option value="cancelled">Cancelado</option>
-            </select></label
-          >
-        </div>
-        <p id="page-summary" class="fine"></p>
-        <div id="orders"></div>
-        <div class="pagination">
-          <button id="previous">← Anteriores</button
-          ><span id="page-number"></span><button id="next">Siguientes →</button>
-        </div>
+        <nav class="admin-tabs" role="tablist" aria-label="Secciones del panel">
+          <button role="tab" id="tab-summary" aria-controls="view-summary" aria-selected="true">
+            Resumen
+          </button>
+          <button role="tab" id="tab-orders" aria-controls="view-orders" aria-selected="false" tabindex="-1">
+            Pedidos
+          </button>
+          <button role="tab" id="tab-products" aria-controls="view-products" aria-selected="false" tabindex="-1">
+            Productos
+          </button>
+          <button role="tab" id="tab-inventory" aria-controls="view-inventory" aria-selected="false" tabindex="-1">
+            Inventario
+          </button>
+          <button role="tab" id="tab-shipping" aria-controls="view-shipping" aria-selected="false" tabindex="-1">
+            Envíos
+          </button>
+          <button role="tab" id="tab-settings" aria-controls="view-settings" aria-selected="false" tabindex="-1">
+            Configuración
+          </button>
+        </nav>
+
+        <section id="view-summary" role="tabpanel" aria-labelledby="tab-summary" tabindex="0">
+          <p class="intro">
+            Datos reales del servidor: pedidos, pagos por verificar e
+            inventario. No se muestran cifras de ejemplo.
+          </p>
+          <div id="summary-cards" class="summary-grid"></div>
+          <p id="summary-inventory-note" class="notice" hidden></p>
+        </section>
+
+        <section id="view-orders" role="tabpanel" aria-labelledby="tab-orders" tabindex="0" hidden>
+          <p class="intro">
+            Verifica cada transferencia en tu banco. Compra la guía desde este
+            panel después de confirmar el pago; registra el envío al entregar el
+            paquete a FedEx.
+          </p>
+          <p id="shipping-status" class="message" role="status"></p>
+          <div
+            id="overview"
+            class="overview"
+            aria-label="Resumen de todos los pedidos"
+          ></div>
+          <div class="filters">
+            <label
+              >Buscar en todos los pedidos<input
+                id="search"
+                type="search"
+                placeholder="Referencia o nombre" /></label
+            ><label
+              >Estado<select id="status-filter">
+                <option value="">Todos</option>
+                <option value="requested">Por confirmar</option>
+                <option value="awaiting_transfer">
+                  Pendiente de transferencia
+                </option>
+                <option value="paid">Pago verificado</option>
+                <option value="shipped">Enviado</option>
+                <option value="delivered">Entregado</option>
+                <option value="cancelled">Cancelado</option>
+              </select></label
+            >
+          </div>
+          <p id="page-summary" class="fine"></p>
+          <div id="orders"></div>
+          <div class="pagination">
+            <button id="previous">← Anteriores</button
+            ><span id="page-number"></span><button id="next">Siguientes →</button>
+          </div>
+        </section>
+
+        <section id="view-products" role="tabpanel" aria-labelledby="tab-products" tabindex="0" hidden>
+          <div class="view-toolbar">
+            <p class="intro">
+              Publica, despublica o archiva sin borrar referencias. Los pedidos
+              anteriores conservan nombre, SKU y precio del momento de la compra.
+            </p>
+            <button id="new-product" class="primary">Nuevo producto +</button>
+          </div>
+          <div id="products-list"></div>
+        </section>
+
+        <section id="view-inventory" role="tabpanel" aria-labelledby="tab-inventory" tabindex="0" hidden>
+          <p class="intro">
+            Disponible = existencias físicas − unidades reservadas. Solo el
+            servidor modifica el inventario; cada cambio queda registrado.
+          </p>
+          <p id="inventory-note" class="notice" hidden></p>
+          <div class="table-wrap">
+            <table class="data-table" id="inventory-table">
+              <thead>
+                <tr>
+                  <th scope="col">Producto</th>
+                  <th scope="col">Talla</th>
+                  <th scope="col">Color</th>
+                  <th scope="col">SKU</th>
+                  <th scope="col">Físico</th>
+                  <th scope="col">Reservado</th>
+                  <th scope="col">Disponible</th>
+                  <th scope="col">Umbral</th>
+                  <th scope="col">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="inventory-rows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="view-shipping" role="tabpanel" aria-labelledby="tab-shipping" tabindex="0" hidden>
+          <p class="intro">
+            La guía FedEx se compra y se registra dentro de cada pedido, con la
+            integración de Envia que ya usa la tienda. Aquí no se duplica esa
+            gestión.
+          </p>
+          <p id="shipping-panel-status" class="notice"></p>
+          <div class="quick-links">
+            <button data-order-filter="paid" class="secondary">
+              Pedidos por preparar
+            </button>
+            <button data-order-filter="shipped" class="secondary">
+              Envíos en tránsito
+            </button>
+            <button data-order-filter="" class="secondary">Todos los pedidos</button>
+          </div>
+          <div class="cards-help">
+            <h2>Cómo se opera un envío</h2>
+            <ol>
+              <li>Confirma el pago en el banco y marca el pedido como pagado.</li>
+              <li>Cotiza y compra la guía FedEx desde la tarjeta del pedido.</li>
+              <li>Entrega el paquete físicamente y registra el rastreo.</li>
+              <li>Marca la entrega cuando FedEx la confirme.</li>
+            </ol>
+          </div>
+        </section>
+
+        <section id="view-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" hidden>
+          <p class="intro">
+            La configuración del propietario (banco, WhatsApp, Envia, políticas
+            y contraseña) sigue en su pantalla privada, con la misma sesión.
+          </p>
+          <div class="cards-help">
+            <h2>Configuración existente</h2>
+            <p>
+              No se duplicó la configuración de Envia: se administra en
+              <a href="settings.html">Configuración del propietario</a>.
+            </p>
+            <p id="settings-envia-status" class="fine"></p>
+            <a class="button-link" href="settings.html">Abrir configuración →</a>
+          </div>
+        </section>
       </section>
     </main>
+    <dialog id="product-dialog" aria-labelledby="product-dialog-title">
+      <div class="dialog-head">
+        <h2 id="product-dialog-title">Producto</h2>
+        <button class="close" aria-label="Cerrar producto">✕</button>
+      </div>
+      <form id="product-form" class="stack">
+        <div class="form-grid">
+          <label>Nombre<input id="p-name" required maxlength="120" /></label>
+          <label>Precio (MXN)<input id="p-price" type="number" min="0" step="0.01" required /></label>
+          <label>Color<input id="p-color" maxlength="40" /></label>
+          <label>Composición<input id="p-composition" maxlength="120" /></label>
+          <label>Gramaje (g/m²)<input id="p-weight" type="number" min="0" max="2000" step="1" /></label>
+          <label>Corte<input id="p-fit" maxlength="60" /></label>
+          <label>Estado
+            <select id="p-status">
+              <option value="draft">Borrador</option>
+              <option value="published">Publicado</option>
+              <option value="archived">Archivado</option>
+            </select>
+          </label>
+        </div>
+        <label>Descripción<textarea id="p-description" rows="3" maxlength="2000"></textarea></label>
+        <label>Fotografías (una por línea: assets/archivo.jpg | texto alternativo)
+          <textarea id="p-images" rows="3" spellcheck="false"></textarea>
+        </label>
+        <fieldset class="variants-fieldset">
+          <legend>Variantes y SKU</legend>
+          <div id="variant-rows"></div>
+          <button type="button" id="add-variant" class="secondary">Añadir variante +</button>
+        </fieldset>
+        <p id="product-error" class="message" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" class="secondary" id="cancel-product">Cancelar</button>
+          <button type="submit" class="primary">Guardar producto</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="movement-dialog" aria-labelledby="movement-title">
+      <div class="dialog-head">
+        <h2 id="movement-title">Inventario</h2>
+        <button class="close" aria-label="Cerrar inventario">✕</button>
+      </div>
+      <p id="movement-variant" class="fine"></p>
+      <form id="threshold-form" class="stack threshold-form">
+        <label>Umbral de stock bajo<input id="t-threshold" type="number" min="0" step="1" required /></label>
+        <button type="submit" class="secondary">Guardar umbral</button>
+      </form>
+      <form id="movement-form" class="stack">
+        <label>Tipo
+          <select id="m-type">
+            <option value="entry">Entrada de unidades</option>
+            <option value="adjustment">Ajuste manual (resta)</option>
+            <option value="correction">Corrección administrativa</option>
+          </select>
+        </label>
+        <label>Cantidad<input id="m-qty" type="number" step="1" required /></label>
+        <label>Motivo<input id="m-reason" maxlength="200" placeholder="Conteo físico, devolución, merma…" /></label>
+        <p id="movement-error" class="message" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="submit" class="primary">Registrar movimiento</button>
+        </div>
+      </form>
+      <h3>Últimos movimientos</h3>
+      <div id="movement-history" class="movement-history"></div>
+    </dialog>
     <footer>
       OFFCODE™ · Panel privado · Guías por acción del propietario.
       Transferencias verificadas manualmente.

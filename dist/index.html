@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="dark" />
     <meta
       name="description"
-      content="Descubre LA AFRO × OFFCODE. Galería de la colección, tallas y pedidos por transferencia bancaria con envío FedEx."
+      content="Hoodie oversize negra de 100% algodón, 420 g/m². Galería, guía de tallas y pedidos por transferencia bancaria con envío FedEx."
     />
     <title>LA AFRO × OFFCODE — OFFCODE™</title>
     <link rel="icon" type="image/png" href="assets/monogram-static.png" />
@@ -64,7 +64,13 @@
           Pausar giro
         </button>
       </div>
-      <button id="bag">Bolsa <span id="count">(0)</span></button>
+      <button id="bag" type="button" aria-label="Abrir bolsa de compra, 0 artículos" aria-haspopup="dialog" aria-controls="cart">
+        <svg class="bag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <rect x="5" y="7.5" width="14" height="13" rx="2" />
+          <path d="M9 8V6a3 3 0 0 1 6 0v2" />
+        </svg>
+        <span id="count" aria-hidden="true">0</span>
+      </button>
     </header>
     <main>
       <section class="hero" aria-labelledby="campaign-title">
@@ -186,15 +192,16 @@
             <p class="eyebrow">LA AFRO × OFFCODE</p>
             <h3>LA AFRO × OFFCODE</h3>
             <p class="price">
-              <strong>$1,650.00 MXN</strong> <del>$2,099.00 MXN</del>
+              <strong id="product-price">$1,650.00 MXN</strong>
+              <del id="product-compare">$2,099.00 MXN</del>
             </p>
             <p class="demo-note">
               Precio de referencia del catálogo proporcionado.
             </p>
             <p class="description" id="product-description">
-              Sudadera negra de la colaboración LA AFRO × OFFCODE. Descubre los
-              gráficos del frente, la espalda y los detalles de la capucha.
-              Selecciona talla y cantidad para probar la bolsa.
+              Hoodie oversize negra de 420 g/m², confeccionada en 100% algodón.
+              Explora el frente, la espalda y los detalles de la capucha, y
+              selecciona talla y cantidad para probar la bolsa.
             </p>
             <fieldset>
               <legend>
@@ -207,6 +214,16 @@
                 ><button data-size="L" aria-pressed="false">L</button
                 ><button data-size="XL" aria-pressed="false">XL</button>
               </div>
+              <p class="sold-out-note" id="sold-out-note" hidden></p>
+              <button
+                type="button"
+                class="size-guide-open"
+                id="size-guide-open"
+                aria-haspopup="dialog"
+                aria-controls="size-guide"
+              >
+                Guía de tallas y medidas <span aria-hidden="true">↗</span>
+              </button>
             </fieldset>
             <div class="quantity">
               <label for="quantity">Cantidad</label>
@@ -231,10 +248,19 @@
               Demostración: disponibilidad por confirmar. No se realizan cobros.
             </p>
             <details>
-              <summary>Detalles de la prenda <span>+</span></summary>
+              <summary>Ficha de la prenda <span>+</span></summary>
+              <dl class="spec-list">
+                <div><dt>Producto</dt><dd>Hoodie oversize</dd></div>
+                <div><dt>Color</dt><dd>Negro</dd></div>
+                <div><dt>Composición</dt><dd>100% algodón</dd></div>
+                <div><dt>Gramaje</dt><dd>420 g/m²</dd></div>
+                <div><dt>Corte</dt><dd>Oversize</dd></div>
+                <div><dt>Temporada</dt><dd>SS 2026</dd></div>
+              </dl>
               <p>
-                Color mostrado: negro. Materiales, medidas y cuidados se
-                añadirán cuando la marca confirme la ficha técnica.
+                Medidas por talla y cuidados de lavado se publicarán cuando la
+                marca confirme la información del taller. No mostramos cifras
+                estimadas.
               </p>
             </details>
             <details>
@@ -345,14 +371,67 @@
         <h2>LA AFRO × OFFCODE</h2>
         <button class="close" aria-label="Cerrar foto">✕</button>
       </div>
-      <img
+      <div class="zoom-toolbar">
+        <button id="zoom-toggle" type="button" aria-pressed="false" aria-controls="zoom-viewport" aria-label="Acercar fotograf&#237;a al doble">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6M7 10h6"/><path class="zoom-plus" d="M10 7v6"/></svg>
+          <span>Acercar 2&#215;</span>
+        </button>
+        <p id="zoom-help">Acerca la foto para ver los detalles.</p>
+      </div>
+      <div id="zoom-viewport" tabindex="0" role="region" aria-label="Detalle de la prenda" aria-describedby="zoom-help">
+      <img draggable="false"
         id="zoom-image"
         src="assets/product-front.jpg"
         alt="Vista ampliada del frente de la sudadera"
       />
+      </div>
+    </dialog>
+    <dialog id="size-guide" aria-labelledby="size-guide-title">
+      <div class="dialog-head">
+        <h2 id="size-guide-title">Guía de tallas</h2>
+        <button class="close" aria-label="Cerrar guía de tallas">✕</button>
+      </div>
+      <p class="guide-lead">
+        Hoodie oversize de 420 g/m² y 100% algodón. El corte es amplio y
+        holgado: si prefieres una caída más ajustada, elige una talla menos.
+      </p>
+      <table class="guide-table">
+        <caption>
+          Tallas contempladas en la ficha técnica
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Talla</th>
+            <th scope="col">Disponibilidad</th>
+          </tr>
+        </thead>
+        <tbody id="size-guide-rows">
+          <tr data-guide-size="XS"><th scope="row">XS</th><td data-guide-status>Por confirmar</td></tr>
+          <tr data-guide-size="S"><th scope="row">S</th><td data-guide-status class="is-available">Disponible</td></tr>
+          <tr data-guide-size="M"><th scope="row">M</th><td data-guide-status class="is-available">Disponible</td></tr>
+          <tr data-guide-size="L"><th scope="row">L</th><td data-guide-status class="is-available">Disponible</td></tr>
+          <tr data-guide-size="XL"><th scope="row">XL</th><td data-guide-status class="is-available">Disponible</td></tr>
+          <tr data-guide-size="XXL"><th scope="row">XXL</th><td data-guide-status>Por confirmar</td></tr>
+        </tbody>
+      </table>
+      <section class="guide-measures" aria-labelledby="guide-measures-title">
+        <h3 id="guide-measures-title">Medidas de la prenda</h3>
+        <p id="guide-measures-note">
+          El taller todavía no entregó la tabla de medidas verificadas.
+          Publicaremos ancho de pecho, largo corporal y largo de manga en
+          centímetros en cuanto la marca las confirme; no mostramos cifras
+          estimadas.
+        </p>
+        <div id="guide-measures-table" hidden></div>
+      </section>
+      <p class="guide-note">
+        La disponibilidad se confirma al revisar tu solicitud. El tiempo de
+        tránsito depende del servicio FedEx que se cotice para tu domicilio y el
+        tiempo de preparación se informará cuando la marca lo confirme.
+      </p>
     </dialog>
     <div id="toast" role="status" aria-live="polite"></div>
-    <script src="app.js?v=store-2"></script>
+    <script src="app.js?v=store-zoom-3"></script>
     <script type="module" src="logo.js"></script>
   </body>
 </html>

@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "mode": "reduced",
+  "effects": 0,
+  "maxDuration": 0,
+  "transforms": {
+    "campaign": "none",
+    "product": "none"
+  },
+  "visible": true
+}

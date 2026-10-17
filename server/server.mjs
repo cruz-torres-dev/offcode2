@@ -13,6 +13,9 @@ import {
 import { DatabaseSync } from "node:sqlite";
 import { safeUrl } from "./envia.mjs";
 import { clientIp, staticPolicy } from "./http-policy.mjs";
+import { createEmailOutbox } from "./email-outbox.mjs";
+import { migrate } from "./db.mjs";
+import { createCatalogStore } from "./catalog-store.mjs";
 import {
   initialSettings,
   normalizeSettings,
@@ -50,27 +53,6 @@ const clean = (v, min, max, label) => {
     throw httpError(400, `Revisa ${label}.`);
   return v.trim();
 };
-function validateItems(items) {
-  if (!Array.isArray(items) || !items.length || items.length > 4)
-    throw httpError(400, "La bolsa no es válida.");
-  const sizes = new Set();
-  const result = items.map((p) => {
-    if (
-      !p ||
-      !["S", "M", "L", "XL"].includes(p.size) ||
-      sizes.has(p.size) ||
-      !Number.isInteger(p.qty) ||
-      p.qty < 1 ||
-      p.qty > 99
-    )
-      throw httpError(400, "Revisa tallas y cantidades (1–99 por talla).");
-    sizes.add(p.size);
-    return { size: p.size, qty: p.qty, unitCents: UNIT_CENTS };
-  });
-  if (result.reduce((s, p) => s + p.qty, 0) > 99)
-    throw httpError(400, "Máximo 99 prendas por solicitud.");
-  return result;
-}
 function validateCustomer(c) {
   if (!c || typeof c !== "object")
     throw httpError(400, "Faltan los datos de contacto.");
@@ -209,6 +191,14 @@ export async function createApp(options = {}) {
     CREATE TABLE IF NOT EXISTS shipping_jobs (order_id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL);`);
   // A process interrupted during a purchase cannot know whether Envia charged it.
   db.exec("UPDATE shipping_jobs SET state='uncertain' WHERE state='pending'");
+  // Versioned catalog/inventory schema. Idempotent: re-running keeps every row.
+  migrate(db);
+  const catalog = createCatalogStore(db);
+  const email = createEmailOutbox({
+    ...options.email,
+    databasePath,
+    listOrders: () => db.prepare("SELECT payload FROM orders").all().map((row) => JSON.parse(row.payload)),
+  });
   const expireQuotes = () =>
     db.prepare("DELETE FROM shipping_quotes WHERE expires<?").run(Date.now());
   expireQuotes();
@@ -262,7 +252,9 @@ export async function createApp(options = {}) {
     createHash("sha256")
       .update(JSON.stringify({ customer, items }))
       .digest("hex");
-  const saveOrder = (order) => {
+  // Writes the order payload only. Callers wrap it in catalog.tx() when stock
+  // must change in the same transaction.
+  const persistOrder = (order) => {
     const { version, labelJob, ...value } = order;
     const result = db
       .prepare(
@@ -271,6 +263,11 @@ export async function createApp(options = {}) {
       .run(JSON.stringify(value), order.id, version);
     if (!result.changes)
       throw httpError(409, "El pedido cambió. Actualiza el panel.");
+    return value;
+  };
+  const saveOrder = (order) => {
+    const value = persistOrder(order);
+    email.capture(value);
     return getOrder(order.id);
   };
   async function quoteShipping(customer, items, orderId = null) {
@@ -364,17 +361,23 @@ export async function createApp(options = {}) {
         if (req.method !== "GET" && req.headers.origin !== origin)
           throw httpError(403, "Origen no autorizado.");
         const ip = clientIp(req, trustRenderProxy);
-        if (route === "/api/config" && req.method === "GET")
+        if (route === "/api/config" && req.method === "GET") {
+          const product = catalog.productPayload();
           return send(res, 200, {
             enabled,
             whatsapp: enabled ? whatsapp : "",
             privacyUrl,
             termsUrl,
-            unitCents: UNIT_CENTS,
+            unitCents: product.priceCents ?? UNIT_CENTS,
             waitlistEnabled,
             vipConsentVersion: VIP_CONSENT_VERSION,
+            product,
+            catalog: catalog.publicCatalog(),
             shipping: shippingConfig,
           });
+        }
+        if (route === "/api/catalog" && req.method === "GET")
+          return send(res, 200, { products: catalog.publicCatalog() });
         if (route === "/api/shipping/states" && req.method === "GET") {
           if (!enabled || !shipping.enabled)
             throw httpError(503, "Envíos todavía no habilitados.");
@@ -394,7 +397,7 @@ export async function createApp(options = {}) {
           return send(res, 200, {
             rates: await quoteShipping(
               validateCustomer(data.customer),
-              validateItems(data.items),
+              catalog.resolveItems(data.items),
             ),
           });
         }
@@ -474,7 +477,7 @@ export async function createApp(options = {}) {
             !/^[a-f0-9-]{36}$/i.test(data.requestKey)
           )
             throw httpError(400, "Falta la referencia de la solicitud.");
-          const items = validateItems(data.items),
+          const items = catalog.resolveItems(data.items),
             customer = validateCustomer(data.customer);
           const prior = db
             .prepare("SELECT * FROM orders WHERE request_key=?")
@@ -507,25 +510,29 @@ export async function createApp(options = {}) {
             3600e3,
           );
           const id = "OF-" + randomBytes(6).toString("hex").toUpperCase(),
-            now = new Date().toISOString();
+            now = new Date().toISOString(),
+            subtotalCents = items.reduce((s, p) => s + p.qty * p.unitCents, 0);
           const order = {
             id,
             createdAt: now,
             updatedAt: now,
             customer,
+            // Snapshot: product name, SKU, size, color, unit price and quantity
+            // are frozen here, so editing or archiving a product never rewrites
+            // a past order.
             items,
-            subtotalCents: items.reduce((s, p) => s + p.qty * UNIT_CENTS, 0),
+            subtotalCents,
             shippingCents: quote?.rate.shippingCents ?? null,
-            totalCents: quote
-              ? items.reduce((s, p) => s + p.qty * UNIT_CENTS, 0) +
-                quote.rate.shippingCents
-              : null,
+            totalCents: quote ? subtotalCents + quote.rate.shippingCents : null,
             shipping: quote
               ? {
                   provider: "envia",
                   carrier: "fedex",
                   service: quote.rate.service,
                   description: quote.rate.description,
+                  // Server-validated amount; the browser value is never trusted.
+                  quotedCents: quote.rate.shippingCents,
+                  deliveryEstimate: quote.rate.deliveryEstimate || "",
                   environment: quote.environment,
                   quotedAt: now,
                 }
@@ -536,9 +543,14 @@ export async function createApp(options = {}) {
             history: [{ at: now, status: "requested" }],
             consent: { at: now, privacyUrl, termsUrl },
           };
-          db.prepare(
-            "INSERT INTO orders(id,request_key,created_at,payload) VALUES(?,?,?,?)",
-          ).run(id, data.requestKey, now, JSON.stringify(order));
+          // Order row and stock reservation commit together or not at all.
+          catalog.tx(() => {
+            db.prepare(
+              "INSERT INTO orders(id,request_key,created_at,payload) VALUES(?,?,?,?)",
+            ).run(id, data.requestKey, now, JSON.stringify(order));
+            catalog.reserve(id, items);
+          });
+          email.capture(order);
           return send(res, 201, {
             id,
             subtotalCents: order.subtotalCents,
@@ -547,6 +559,79 @@ export async function createApp(options = {}) {
         }
         if (route.startsWith("/api/admin/")) {
           auth(req);
+          if (route === "/api/admin/email-notifications" && req.method === "GET") {
+            const orderId = new URL(req.url, origin).searchParams.get("orderId");
+            getOrder(orderId);
+            return send(res, 200, { ...email.status(), notifications: email.list(orderId) });
+          }
+          const emailRetry = route.match(/^\/api\/admin\/email-notifications\/([a-f0-9]{64})\/retry$/);
+          if (emailRetry && req.method === "POST") {
+            limit("email-retry:" + ip, 10, 60e3);
+            await body(req);
+            if (!email.retry(emailRetry[1])) throw httpError(409, "Este correo no admite un reintento seguro. Revisa su estado y la ventana de idempotencia.");
+            return send(res, 202, { queued: true });
+          }
+          // Dashboard: only real counters, computed from orders and inventory.
+          if (route === "/api/admin/summary" && req.method === "GET") {
+            limit("admin-summary:" + ip, 240, 60e3);
+            return send(res, 200, {
+              ...catalog.summary(),
+              shipping: shippingConfig,
+            });
+          }
+          if (route === "/api/admin/products" && req.method === "GET") {
+            limit("admin-products:" + ip, 240, 60e3);
+            return send(res, 200, { products: catalog.listProducts() });
+          }
+          if (route === "/api/admin/products" && req.method === "POST") {
+            limit("admin-products-write:" + ip, 60, 60e3);
+            return send(res, 201, { product: catalog.createProduct(await body(req)) });
+          }
+          const productMatch = route.match(/^\/api\/admin\/products\/([A-Za-z0-9-]{4,40})$/);
+          if (productMatch && req.method === "PATCH") {
+            limit("admin-products-write:" + ip, 60, 60e3);
+            return send(res, 200, {
+              product: catalog.updateProduct(productMatch[1], await body(req)),
+            });
+          }
+          const productStatus = route.match(
+            /^\/api\/admin\/products\/([A-Za-z0-9-]{4,40})\/status$/,
+          );
+          if (productStatus && req.method === "POST") {
+            limit("admin-products-write:" + ip, 60, 60e3);
+            const data = await body(req);
+            return send(res, 200, {
+              product: catalog.setProductStatus(productStatus[1], data.status),
+            });
+          }
+          if (route === "/api/admin/inventory" && req.method === "GET") {
+            limit("admin-inventory:" + ip, 240, 60e3);
+            return send(res, 200, { variants: catalog.listInventory() });
+          }
+          const inventoryMatch = route.match(
+            /^\/api\/admin\/inventory\/([A-Za-z0-9-]{4,40})(\/movements)?$/,
+          );
+          if (inventoryMatch && req.method === "GET" && inventoryMatch[2]) {
+            limit("admin-inventory:" + ip, 240, 60e3);
+            return send(res, 200, {
+              movements: catalog.listMovements(inventoryMatch[1]),
+            });
+          }
+          if (inventoryMatch && req.method === "POST" && inventoryMatch[2]) {
+            limit("admin-inventory-write:" + ip, 120, 60e3);
+            return send(res, 201, {
+              variant: catalog.recordMovement(inventoryMatch[1], await body(req)),
+            });
+          }
+          if (inventoryMatch && req.method === "PATCH" && !inventoryMatch[2]) {
+            limit("admin-inventory-write:" + ip, 120, 60e3);
+            return send(res, 200, {
+              variant: catalog.updateInventorySettings(
+                inventoryMatch[1],
+                await body(req),
+              ),
+            });
+          }
           if (route === "/api/admin/settings" && req.method === "GET")
             return send(res, 200, {
               settings: publicSettings(currentSettings),
@@ -1012,6 +1097,8 @@ export async function createApp(options = {}) {
                     carrier: "fedex",
                     service: q.rate.service,
                     description: q.rate.description,
+                    quotedCents: q.rate.shippingCents,
+                    deliveryEstimate: q.rate.deliveryEstimate || "",
                     environment: q.environment,
                     quotedAt: new Date().toISOString(),
                   };
@@ -1076,7 +1163,15 @@ export async function createApp(options = {}) {
             order.status = change.status;
             order.updatedAt = new Date().toISOString();
             order.history.push({ at: order.updatedAt, status: order.status });
-            return send(res, 200, { order: saveOrder(order) });
+            // Stock and order status move together: a failed write never leaves
+            // the inventory discounted without the matching status.
+            const value = catalog.tx(() => {
+              if (change.status === "paid") catalog.sell(order.id);
+              if (change.status === "cancelled") catalog.release(order.id);
+              return persistOrder(order);
+            });
+            email.capture(value);
+            return send(res, 200, { order: getOrder(order.id) });
           }
         }
         throw httpError(404, "Ruta no encontrada.");
@@ -1167,15 +1262,18 @@ export async function createApp(options = {}) {
   server.requestTimeout = 15000;
   return {
     server,
-    close: () =>
-      new Promise((resolve) => {
+    email,
+    close: async () => {
+      await email.close();
+      return new Promise((resolve) => {
         clearInterval(quoteCleanup);
         server.close(() => {
           db.close();
           resolve();
         });
         server.closeAllConnections();
-      }),
+      });
+    },
   };
 }
 if (

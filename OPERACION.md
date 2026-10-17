@@ -45,6 +45,174 @@ Un pedido con guía comprada no puede cancelarse desde el panel; gestiona primer
 
 El aviso de privacidad y las condiciones reales deben explicar el uso de datos de entrega por Envia/FedEx antes de habilitar la cotización. Referencias oficiales: [cotización](https://docs.envia.com/reference/get-shipping-rates), [crear guía](https://docs.envia.com/reference/create-shipping-label), [flujo y entornos](https://docs.envia.com/docs/envia-shipping-api-introduction).
 
+## Ficha de la prenda y guía de tallas
+
+La ficha pública usa solo datos comerciales confirmados por la marca: **hoodie oversize**, color **negro**, **100% algodón**, **420 g/m²** y temporada **SS 2026**. Se muestran en "Ficha de la prenda", dentro de la sección del producto, y salen de `server/catalog.mjs`, que también alimenta `/api/config` (`product`).
+
+El TECH PACK es confidencial. **No se copió al repositorio, a `dist/`, a Git ni al despliegue**; solo se extrajeron los datos comerciales anteriores. No se publican cantidades de inventario, costos, ubicaciones de estampado, medidas de aplicación ni instrucciones de confección.
+
+### Guía de tallas
+
+El botón "Guía de tallas y medidas" abre un `<dialog>` nativo: se cierra con el botón, con Escape y con clic fuera, devuelve el foco al botón y no anima nada con `prefers-reduced-motion`.
+
+- **Seis tallas contempladas** (XS, S, M, L, XL, XXL) con su disponibilidad real.
+- **Habilitadas para venta hoy: S, M, L, XL.** XS y XXL aparecen como "Por confirmar", no son seleccionables y el servidor las rechaza con 400.
+- **No hay tabla de centímetros.** El documento de confección no incluye medidas de pecho, largo corporal ni manga, así que no se inventan ni se aproximan. El bloque de medidas explica que están pendientes y la tabla permanece oculta.
+
+Configuración, sin tocar HTML ni CSS:
+
+- Habilitar una talla: crear o reactivar su variante en `Productos` del panel. El selector, la guía, el checkout y la validación del servidor se actualizan solos. `server/catalog.mjs` solo declara las seis tallas contempladas.
+- Publicar medidas: rellenar `measurements.rows`, por ejemplo `{ "S": { chest: 58, body: 68, sleeve: 60 } }` en centímetros. La tabla se genera con los campos declarados en `measurements.fields`.
+- Publicar tiempo de preparación: `preparation.businessDays` (hoy `null`, que significa "no se promete ningún plazo").
+
+### Envío exclusivamente FedEx
+
+La integración existente ya trabaja solo con FedEx mediante Envia: la cotización envía `shipment.carrier = "fedex"`, descarta cualquier servicio de otro transportista, ignora monedas distintas de MXN y rechaza importes inválidos. El comprador elige el servicio antes de confirmar y el servidor vuelve a validar la cotización guardada; el importe que envíe el navegador nunca se usa.
+
+Cada pedido guarda `shipping: { provider, carrier, service, description, quotedCents, deliveryEstimate, environment, quotedAt }`. `deliveryEstimate` es la estimación que devuelve FedEx para esa cotización y puede venir vacía: no se completa a mano. El número de rastreo se guarda solo cuando Envia genera realmente una guía, y marcar "enviado" exige confirmar la entrega física del paquete.
+
+Pendiente para operar FedEx de verdad:
+
+1. `ENVIA_TOKEN` de la cuenta real, primero en sandbox.
+2. `ENVIA_ORIGIN_JSON` con el domicilio de origen y el código de estado de Envia.
+3. `ENVIA_PACKAGES_JSON` con peso y medidas **medidos** por cantidad de prendas.
+4. Validar cobertura, tarifas y una guía de prueba en sandbox.
+
+La **consulta automática de seguimiento no está implementada**: esta integración no consulta el estado de entrega, y no se añadió un endpoint sin verificarlo antes con la cuenta. El rastreo se registra en el panel y se consulta en el sitio de FedEx. No se promete ningún plazo de entrega: el checkout muestra únicamente lo que devuelve la cotización y el tiempo de preparación sigue sin confirmar.
+
+## Catálogo administrable, inventario y migraciones
+
+El panel `/admin.html` administra el catálogo y el inventario reales. La tienda deja de depender de tallas escritas a mano: el selector, la guía, la bolsa y el checkout se alimentan de la base de datos.
+
+### Productos y variantes
+
+- Tablas: `products`, `product_images`, `variants` e `inventory`. Cada variante es una combinación de **talla + color** con su propio SKU.
+- Estados del producto: `draft` (borrador), `published` (visible en la tienda) y `archived` (fuera de la tienda, sin borrar nada). Transiciones válidas: borrador ⇄ publicado, cualquiera → archivado, archivado → borrador. Cualquier otro cambio responde 409.
+- Un producto publicado necesita al menos una variante activa; el servidor lo exige.
+- **El SKU es único por variante a nivel de base de datos** (`UNIQUE`), no solo en la interfaz. Un duplicado responde 409 con el SKU en el mensaje.
+- Despublicar o archivar **no altera los pedidos anteriores**: cada pedido guarda su propia copia de nombre, talla, SKU y precio del momento de la compra.
+- Fotografías: se registran como rutas internas (`assets/...`) con texto alternativo. El servidor rechaza rutas con `..`, rutas absolutas y URLs externas. No hay subida de archivos; si algún día se añade, debe validar tipo, tamaño y nombre antes de escribir en disco.
+- El TECH PACK sigue siendo confidencial: no se copió a `dist/`, a Git ni al despliegue, y el inventario **no se sembró** con sus cantidades.
+
+La prenda publicada hoy es la hoodie oversize negra (S, M, L, XL). XS y XXL existen como tallas contempladas pero no tienen variante: la tienda no las ofrece.
+
+### Inventario por variante
+
+- `disponible = existencias físicas − unidades reservadas`, nunca negativo (`MAX(0, …)`).
+- Cada variante tiene su **umbral de stock bajo**, configurable desde el panel. El resumen cuenta las variantes que están en o por debajo del umbral.
+- **El control de stock se activa por variante con la primera entrada.** Mientras una variante siga sin configurar, `disponible` es `null` y los pedidos se aceptan sin reservar nada, igual que antes de esta versión: no se inventan existencias.
+- Movimientos registrados, siempre con actor y fecha: `entry` (entrada), `adjustment` (ajuste, puede restar), `correction` (corrección administrativa), `reserve`, `sale` y `release`. Las entradas y ajustes manuales **exigen motivo** y no pueden dejar el inventario en negativo.
+- Todo el inventario se modifica **solo en el servidor**. El panel no calcula cantidades: envía el movimiento y vuelve a leer.
+
+### Reserva, pago y deducción
+
+1. Al crear el pedido, el servidor valida variante, precio y stock, y **reserva** las unidades dentro de una transacción `BEGIN IMMEDIATE` de SQLite. Dos solicitudes simultáneas por la última unidad: una recibe 201 y la otra 409.
+2. **Reservar no es cobrar ni descontar.** Las unidades reservadas siguen siendo físicas.
+3. Al marcar `paid`, la reserva se convierte en venta **una sola vez** y ahí se descuentan las unidades físicas.
+4. Al cancelar, se **libera** la reserva. Cancelar después de pagar no devuelve stock automáticamente: la devolución es un movimiento manual con motivo.
+5. Estados no válidos se rechazan con 409 y las transiciones repetidas no mueven el stock dos veces.
+
+**La caducidad de reservas no está implementada.** No se inventó un plazo: una solicitud sin pagar mantiene sus unidades reservadas hasta que el propietario la cancele o la marque pagada. Las reservas pendientes se ven en `Inventario` (columna "Reservado") y en los movimientos de cada variante; el resumen muestra el total de unidades reservadas. Si se define un plazo comercial, debe implementarse como una tarea aparte con su propia decisión de negocio.
+
+### Migraciones
+
+- Versionadas con `PRAGMA user_version` y `SCHEMA_VERSION` en `server/db.mjs`. Se aplican en una transacción: si una falla, no queda nada a medias.
+- Idempotentes: arrancar dos veces no duplica productos, variantes ni movimientos. La prueba correspondiente crea el esquema, lo vuelve a migrar y comprueba que los pedidos y productos existentes siguen intactos.
+- **La ruta de la base de datos no cambió** (`DATABASE_PATH` o `./data/offcode.sqlite`). Las claves son estables: `PRD-…`, `VAR-…`, `MOV-…` y los pedidos conservan `OF-…`.
+- Integridad referencial activada (`PRAGMA foreign_keys = ON`) y restricciones `CHECK` para cantidades y estados.
+
+### Pasos manuales para activar el sistema en producción
+
+1. **Respalda** el archivo de `DATABASE_PATH` (y su carpeta `.email-outbox/`) antes de desplegar.
+2. Despliega. Al arrancar, la migración se aplica sola y no borra datos.
+3. Entra a `/admin.html` → **Inventario** y registra una **entrada con el conteo físico real** de cada variante. Ese primer movimiento activa el control de stock de esa talla.
+4. Ajusta el **umbral de stock bajo** por variante según tu operación.
+5. En **Productos**, publica o despublica lo que corresponda y confirma que los SKU son los definitivos.
+6. Revisa la tienda: las tallas agotadas aparecen deshabilitadas con la leyenda "Agotado" y no se pueden añadir a la bolsa.
+7. Repite el conteo cada vez que haya devoluciones o mermas; queda registrado con fecha y motivo.
+
+## Correo transaccional (Resend)
+
+El envío de correos es **opcional y está desactivado por defecto**. Sin configuración, la tienda, el checkout, el panel y Envia funcionan exactamente igual que antes: la solicitud se guarda, los estados cambian y no se intenta ningún envío. Al iniciar, el servidor registra `{"component":"email","code":"disabled"}` (o `configuration_missing` si faltan valores). No existe ningún modo que simule envíos correctos.
+
+El código vive en `server/email.mjs` (transporte y plantillas) y `server/email-outbox.mjs` (cola durable). No hay dependencias nuevas: usa `fetch` de Node 24.
+
+### Variables privadas
+
+- `EMAIL_ENABLED`: `false` por defecto. Solo el valor exacto `true` habilita el envío; es independiente de `ORDERS_ENABLED`. Añadir la clave no activa nada por sí solo.
+- `RESEND_API_KEY`: clave privada de Resend. Solo la usa el proceso del servidor.
+- `EMAIL_FROM`: **una sola** dirección del dominio verificado en Resend (remitente).
+- `ORDER_NOTIFICATION_EMAIL`: buzón real del propietario que recibirá los avisos de pedido.
+
+La clave nunca aparece en `dist/`, en respuestas de la API, en el journal ni en los registros. `.env.example` solo contiene valores vacíos; `.env` sigue excluido por `.gitignore`.
+
+### Qué correos se envían
+
+Al recibir una solicitud de pedido:
+
+- **Propietario**: aviso de nuevo pedido con la referencia y un resumen mínimo (tallas y cantidades). No incluye nombre, teléfono, domicilio ni notas del cliente.
+- **Comprador**: confirmación de que la solicitud fue recibida, solo si su dirección es válida. Aclara que recibir la solicitud no confirma disponibilidad, pago ni envío.
+
+Al cambiar el estado, únicamente cuando el servidor acepta una transición válida:
+
+- `awaiting_transfer`: instrucciones de transferencia con el total confirmado y la referencia. **No incluye CLABE ni datos bancarios**: remite al canal de atención acordado.
+- `paid`: pago verificado, sin afirmar que el paquete ya salió.
+- `shipped`: pedido enviado con el rastreo real registrado en el panel. Si el pedido no tiene rastreo, el correo se omite en lugar de inventarlo.
+- `delivered`: entrega confirmada.
+- `cancelled`: cancelación confirmada, sin prometer ni ejecutar un reembolso.
+
+Las repeticiones y las transiciones inválidas responden 409 y no generan correo. Cada mensaje tiene versión HTML (identidad oscura y editorial) y alternativa de texto plano, en español. Nunca se incluyen: datos bancarios, domicilio completo, teléfono, notas, importes sin confirmar, fechas de entrega ni números de guía inventados. Un estado histórico que ya fue superado se marca `superseded` y no se envía.
+
+### Fiabilidad, duplicados y reintentos
+
+El registro vive en un journal aparte junto a la base: `<DATABASE_PATH>.email-outbox/` (por ejemplo `data/offcode.sqlite.email-outbox/`), excluido de Git. No cambia el esquema SQLite ni las tablas de pedidos y guías.
+
+- Cada notificación se identifica con un hash de referencia + estado + destinatario. Repetir la solicitud, recargar el panel o reiniciar el proceso no duplica el envío.
+- El trabajo se escribe en disco **antes** de llamar a Resend. El reintento reutiliza la misma `Idempotency-Key` y el mismo cuerpo, así que el proveedor no crea un segundo mensaje.
+- La ventana de idempotencia de Resend es de 24 horas; la aplicación la corta en 23 por margen. Pasado ese plazo el trabajo pasa a `review` y no se reintenta automáticamente.
+- Estados posibles: `pending`, `sending`, `accepted`, `failed`, `uncertain`, `review`, `skipped`, `superseded`. **`accepted` significa que Resend aceptó el mensaje, no que llegó al buzón.**
+- Timeout de 5 segundos y una petición por ciclo: el proceso de compra no espera al proveedor. Un pedido responde 201 aunque el correo falle.
+- Error HTTP, timeout, excepción de red o respuesta sin identificador válido quedan como `failed` o `uncertain`, nunca como enviados. El pedido no se pierde ni se duplica y el comprador no necesita reenviarlo.
+- Un trabajo que quedó en `sending` al arrancar (proceso interrumpido) pasa a `uncertain` y se reintenta con la misma clave y el mismo contenido.
+- Reintento manual: en el panel, bloque "Correos transaccionales" → "Reintentar con la misma referencia". Equivale a `POST /api/admin/email-notifications/:id/retry`, exige sesión, mismo origen y solo se permite dentro de la ventana y si el envío no fue aceptado. La consulta de estado es `GET /api/admin/email-notifications?orderId=...`, privada y con `no-store`.
+- El journal guarda solo datos de plantilla (referencia, tallas, cantidades, total confirmado, rastreo). El cuerpo completo se descarta al aceptarse y la clave API nunca se escribe.
+
+### Verificar el dominio en Resend sin tocar el correo actual
+
+`offcode.mx` ya tiene buzones en Solucionix y su zona publica: MX `offcode.mx.`, SPF `v=spf1 a mx ip4:192.145.235.74 ~all`, DKIM en `default._domainkey` y DMARC `v=DMARC1; p=none`. **No sobrescribas ni elimines esos registros**: el correo existente dejaría de funcionar.
+
+1. Verifica un **subdominio**, no la raíz. Resend lo recomienda para separar reputación; además mantiene sus registros en nombres distintos de los actuales. El propietario elige el nombre (por ejemplo uno dedicado a envíos); no se ha creado ni verificado ninguno.
+2. En Resend → Domains → Add Domain escribe ese subdominio y elige la región más cercana a los destinatarios.
+3. Abre la pestaña **Records** y copia **exactamente** lo que genera Resend: TXT de SPF, TXT de DKIM (con su nombre propio, del tipo `resend._domainkey.<subdominio>`) y el MX o CNAME del Return-Path, que por defecto es `send.<subdominio>`. No adaptes ni inventes valores.
+4. Añádelos en el panel DNS de Solucionix. No borres `default._domainkey`, no cambies el MX `offcode.mx.` ni el TXT SPF del `@`. Los registros nuevos del subdominio no compiten con ellos.
+5. **SPF**: solo puede existir un TXT SPF por nombre. Mientras el envío salga del subdominio, el SPF del dominio raíz no se toca. Si en el futuro se quisiera enviar desde la raíz, no se debe crear un segundo registro: hay que integrar el mecanismo de Resend dentro del registro existente, antes de `~all`, conservando `a mx ip4:192.145.235.74` y sin superar 10 búsquedas DNS. Dos TXT SPF en el mismo nombre hacen fallar la autenticación.
+6. **DMARC**: la política del dominio raíz (`p=none`) cubre también los subdominios, así que no hace falta otro registro. No la subas a `quarantine` o `reject` sin revisar antes los informes: afectaría igualmente al correo existente de Solucionix.
+7. Confirma la propagación con la herramienta de Resend ([dns.email](https://dns.email/)) o `dig` antes de dar el dominio por verificado. Suele tardar minutos y puede llegar a 72 horas; usa "Restart verification" solo después de comprobar los registros.
+8. `EMAIL_FROM` debe ser una dirección de ese subdominio ya verificado; el propietario decide el buzón y no se ha creado ninguno. `ORDER_NOTIFICATION_EMAIL` debe ser un buzón que realmente lea: puede seguir siendo el actual de Solucionix, porque solo recibe.
+
+### Configurar en Render
+
+1. Web Service → Environment: añade las cuatro variables como secretos. No las escribas en `render.yaml` ni en el repositorio; `.env.example` solo lleva nombres con valores vacíos.
+2. Despliega primero con `EMAIL_ENABLED=false` y el resto vacío: el servicio arranca sin enviar nada. Después de verificar el dominio, carga la clave y las direcciones y cambia a `true`. Guardar variables reinicia el servicio.
+3. Revisa los Logs al arrancar: debe aparecer `{"component":"email","code":"enabled"}`. Si aparece `disabled` o `configuration_missing`, no se enviará nada.
+4. El journal se guarda en el disco persistente junto a `DATABASE_PATH`. **No lo borres entre despliegues**: es lo que evita duplicados. No hay que cambiar el servicio, el disco, el checkout, SQLite ni la integración FedEx/Envia.
+
+### Prueba controlada de envío (manual)
+
+Solo después de tener el dominio verificado y las cuatro variables reales:
+
+```
+npm run email:smoke -- --send-to-owner <uuid-nuevo>
+```
+
+Envía **un** correo de prueba al propietario, con asunto "OFFCODE · Prueba controlada de correo" y texto que aclara que no corresponde a un pedido. No crea ni modifica pedidos, no usa las plantillas de pedido y no se ejecuta en `npm test` ni en el arranque. Imprime `{"state":"accepted"}` o el código de fallo. Genera un UUID nuevo cada vez (`node -e "console.log(crypto.randomUUID())"`); repetir el mismo devuelve el resultado idempotente en lugar de un segundo correo. Si responde `disabled`, `failed` o `uncertain`, no lo repitas a ciegas: revisa Resend y los logs.
+
+Después de recibirlo, comprueba en las cabeceras que SPF y DKIM pasan (`Authentication-Results`) y que no cae en spam. **Esta prueba no se ha ejecutado**: no hay credenciales reales en el repositorio.
+
+### Fuera de alcance
+
+Campañas masivas, mensajes automáticos de WhatsApp, envío del PDF de la guía, plantillas editables desde el panel y confirmación de entrega por webhook. No están implementados y no deben añadirse a este flujo sin consentimiento y configuración propios.
+
 ## Ejecutar sin publicar
 
 Necesitas Node.js **24.14.x**. No hay paquetes npm que instalar ni proceso de compilación. El visor 3D ya está incluido localmente. SQLite forma parte de Node y emite el aviso de API experimental en esta versión.
@@ -75,6 +243,7 @@ Completa estos valores privados en `.env` o en el panel del proveedor de hosting
 - PRIVACY_URL y TERMS_URL: direcciones HTTPS de las páginas reales de privacidad y condiciones de compra de la marca. No se han inventado políticas.
 - PUBLIC_ORIGIN: URL exacta de la tienda; debe ser HTTPS en producción.
 - DATABASE_PATH: ubicación privada del archivo SQLite en almacenamiento persistente.
+- Medidas por talla (ancho de pecho, largo corporal y largo de manga en centímetros) y el tiempo de preparación en días hábiles. Sin ellas la tienda funciona, pero la guía de tallas no publica tabla y no se promete ninguna fecha de entrega.
 
 Confirma también precios, existencias, origen de los envíos, procedimiento para cotizarlos y condiciones de cambios y devoluciones. No actives ventas con datos de ejemplo. Las páginas de privacidad y condiciones deben estar publicadas y revisadas por el propietario.
 
@@ -135,6 +304,18 @@ Para usar esa alternativa, configura en Render:
 - Las demás variables indicadas arriba; las ventas continúan desactivadas hasta completar todo.
 - Una sola instancia de aplicación con este disco SQLite. Para varias instancias habrá que migrar a una base de datos compartida.
 
+### Desplegar esta versión (catálogo e inventario)
+
+1. **Respalda antes de desplegar.** Con el servicio detenido, copia `/var/data/offcode.sqlite` y la carpeta `/var/data/offcode.sqlite.email-outbox/`. No copies una base activa como si fuera un archivo estático.
+2. El despliegue debe usar el **Web Service Node**, no el sitio estático. `render.yaml` describe el sitio estático (`offcode-demo`, publica `./dist`) y no ejecuta la API: en él la tienda se ve, pero los pedidos, el panel y Envia no funcionan. `render-orders.yaml` describe el servicio Node con disco; Render solo lee `render.yaml` por defecto, así que ese archivo **no crea nada por sí solo**.
+3. Confirma antes de desplegar: `DATABASE_PATH=/var/data/offcode.sqlite`, disco montado en `/var/data`, `HOST=0.0.0.0`, `NODE_ENV=production`, `NODE_VERSION=24.14.0`, `ADMIN_PASSWORD` y `SETTINGS_ENCRYPTION_KEY` definidas en el panel (nunca en el repositorio).
+4. Mantén `ORDERS_ENABLED=false` y `ENVIA_ENABLED=false` en el primer arranque.
+5. Al arrancar, la migración crea las tablas de catálogo e inventario si no existen y deja `PRAGMA user_version = 1`. **No borra pedidos ni productos**: si las tablas ya existen, no hace nada. La hoodie se siembra solo si la tabla `products` está vacía y **sin existencias** (`configured = 0`).
+6. Revisa los registros de arranque: debe aparecer una sola línea `OFFCODE: https://… · operación en /admin.html`. Un ciclo de reinicios suele indicar que falta `ADMIN_PASSWORD`, que `PUBLIC_ORIGIN` no es un origen HTTPS exacto o que `validateActivation` rechazó la configuración.
+7. Después del despliegue, define `PUBLIC_ORIGIN` con el dominio HTTPS exacto y vuelve a desplegar. Si el dominio no coincide, las peticiones `POST` del panel y del checkout responden 403 (protección de origen), que es el comportamiento correcto.
+8. Comprueba `/api/config` (200, JSON, `Cache-Control: no-store`), `/admin.html` (200, `no-store`) y `/api/admin/summary` sin sesión (401). No marques pedidos como pagados ni generes guías para "probar".
+9. Cuando el inventario físico esté contado y la cuenta de Envia validada, registra las entradas reales en el panel y solo entonces activa las ventas.
+
 No uses el disco efímero de un servicio gratuito para pedidos reales: los datos pueden perderse al reiniciar o desplegar. Referencias: [Render: discos persistentes](https://render.com/docs/disks), [Node.js 24: SQLite](https://nodejs.org/docs/latest-v24.x/api/sqlite.html).
 
 Las direcciones de clientes se guardan en el archivo SQLite privado y no se publican desde `dist/`. El propietario debe conservar copias de respaldo fuera del repositorio y definir la conservación de esos datos en su aviso de privacidad. Para una copia manual local, detén el servidor antes de copiar el directorio de datos; no copies una base activa como si fuera un archivo estático.
@@ -147,12 +328,29 @@ Las direcciones de clientes se guardan en el archivo SQLite privado y no se publ
 
 Ejecuta `npm test`. Las pruebas usan datos ficticios y comprueban el ciclo completo, totales del servidor, persistencia tras reinicio, reintentos sin duplicados, control de versiones, acceso privado, rechazo de cambios de estado inválidos y bloqueo de ventas sin configurar.
 
-La suite tiene 21 pruebas aprobadas. También comprueba configuración cifrada y autenticada, token oculto, persistencia de credenciales, cierre de sesiones al cambiar contraseña, rechazo de claves incorrectas, invalidación de tarifas al editar datos, cuenta bancaria acordada, búsqueda de pedidos fuera de la primera página y URL automática de Render con prioridad del dominio explícito. La UI de configuración y el flujo hasta una guía ficticia se revisaron en escritorio de 1440 px y móvil de 390 px; la configuración también se comprobó a 320 px, sin desplazamiento horizontal. Capturas en `qa/configuracion-desktop.jpg`, `qa/configuracion-mobile-portada.jpg` y `qa/panel-actualizado-desktop.jpg` (todos sus datos son ficticios).
+La suite tiene 47 pruebas aprobadas. Además del flujo de pedidos, configuración cifrada, token oculto, persistencia de credenciales, cierre de sesiones al cambiar contraseña, invalidación de tarifas al editar datos, cuenta bancaria acordada, búsqueda de pedidos fuera de la primera página y URL automática de Render con prioridad del dominio explícito, cubre el catálogo y el inventario:
+
+- Migraciones versionadas e idempotentes que conservan productos y pedidos.
+- Crear, editar, publicar, despublicar y archivar sin perder referencias; SKU duplicado rechazado al crear y al editar.
+- Inventario por talla y color con entradas, ajustes con motivo obligatorio y sin cantidades negativas.
+- Reserva → pago → cancelación que mueve el stock una sola vez; cancelar antes del pago libera.
+- Dos solicitudes concurrentes por la última unidad: una gana con 201 y la otra recibe 409.
+- Stock agotado y variante archivada bloquean la venta; una variante sin configurar no inventa stock.
+- La tienda marca las tallas agotadas como deshabilitadas y las excluye de la lista vendible; el precio sale del catálogo.
+- Un pedido histórico no cambia al editar o archivar el producto.
+- Sin sesión o desde otro origen no se administra catálogo ni inventario; precios negativos y rutas de imagen con `..` se rechazan.
+- Una solicitud duplicada y un fallo de correo no reservan dos veces ni filtran secretos.
+
+La UI de configuración y el flujo hasta una guía ficticia se revisaron en escritorio de 1440 px y móvil de 390 px; la configuración también se comprobó a 320 px, sin desplazamiento horizontal. El panel nuevo se revisó en escritorio de 1280 px y móvil de 390 px: las seis secciones, la tabla de inventario convertida en fichas apiladas, el diálogo de producto y el de movimientos. Capturas en `qa/configuracion-desktop.jpg`, `qa/configuracion-mobile-portada.jpg` y `qa/panel-actualizado-desktop.jpg` (todos sus datos son ficticios).
+
+Las siete pruebas de `tests/email.test.mjs` usan un proveedor simulado y datos ficticios: no envían correos reales ni llaman a Resend. Cubren configuración ausente y desactivada por defecto, envío correcto al propietario y al comprador, error y timeout del proveedor, respuesta HTTP 200 sin identificador válido, pedido duplicado sin segundo envío, transición válida, transición inválida, fallo de correo sin pérdida ni duplicación del pedido, reinicio del proceso sin duplicar, ventana de idempotencia vencida, direcciones inválidas, estados superados, pedido que responde sin esperar al proveedor y ausencia de la clave o de datos personales en respuestas, registros y journal. Falta la prueba controlada contra Resend real descrita arriba; no se ejecutó.
+
+Las pruebas de `tests/product.test.mjs` comprueban la ficha pública (seis tallas contempladas, cuatro habilitadas, sin medidas inventadas), el rechazo de tallas no habilitadas y que un fallo de correo o la ausencia del proveedor de envío no pierdan el pedido. `tests/shipping.test.mjs` verifica además que el pedido guarda la tarifa validada, el servicio y el estimado devuelto por FedEx, y que el importe enviado por el navegador se ignora.
 
 Las pruebas Envia sustituyen el transporte HTTP por respuestas sintéticas compatibles con su documentación: no requieren token ni hacen llamadas a la cuenta del propietario. Comprueban FedEx exclusivo, consentimiento, cotización ligada a dirección y prendas, caducidad, total del servidor, acceso privado, pago previo, doble clic, respuesta HTTP200 con error, bloqueo durable, conciliación y persistencia tras reinicio. Las cotizaciones guardadas con datos de entrega se eliminan al vencer, con limpieza cada minuto y al iniciar el servidor; los pedidos conservan su historial según la política del propietario. Falta validar con sandbox real y con las tarifas/cobertura de su cuenta; sin el acceso del propietario no se puede comprobar esa parte.
 
 Para revisar la interfaz sin cuenta ni datos reales, ejecuta `npm run preview:shipping` y abre http://127.0.0.1:8013/tienda.html. El panel está en /admin.html, con contraseña **solo-pruebas-fedex-ficticias** (únicamente para esta vista sintética). La base está en memoria y desaparece al detener el proceso. Este helper solo escucha en loopback y no se permite con NODE_ENV=production. No consulta la API real. Su enlace PDF es ficticio y no descarga una guía; el PDF real se valida después con sandbox de Envia. No uses este comando para abrir ventas.
 
-La revisión del navegador usa una base de pruebas en memoria separada. No se hicieron depósitos, no se compraron guías reales y no se enviaron mensajes por WhatsApp. Las notificaciones automáticas, validación bancaria automática y gestión de inventario no están implementadas.
+La revisión del navegador usa una base de pruebas en memoria separada. No se hicieron depósitos, no se compraron guías reales, no se enviaron mensajes por WhatsApp y no se envió ningún correo real. El correo transaccional está implementado y desactivado por defecto; las campañas masivas, los mensajes automáticos de WhatsApp, la validación bancaria automática y la gestión de inventario no están implementadas.
 
 No se ha hecho push ni despliegue durante esta implementación.

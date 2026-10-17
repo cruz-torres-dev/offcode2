@@ -6,4 +6,9 @@ node_modules/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+*.email-outbox/
 offcode-vip*.csv
+# Local agent workspace data (never part of the site or the deployment).
+.workbuddy-ai/
+# Exported DNS zone of the domain: infrastructure data, not application code.
+*.zone

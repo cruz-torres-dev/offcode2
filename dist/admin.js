@@ -90,7 +90,7 @@ async function load() {
   $("#previous").disabled = page === 0;
   $("#page-number").textContent = "Página " + (page + 1);
   $("#page-summary").textContent =
-    `${data.total} pedidos encontrados · ${loaded.length} en esta página.`;
+    `${data.total} ${data.total === 1 ? "pedido encontrado" : "pedidos encontrados"} · ${loaded.length} en esta página.`;
   render();
 }
 async function shippingAction(order, action, data, button) {
@@ -296,6 +296,47 @@ function formAction(card, order, label, fields, build) {
 function transferMessage(o) {
   const account = o.transferAccount ?? bank;
   return `OFFCODE · ${o.id}\nLA AFRO × OFFCODE: ${o.items.map((p) => `${p.qty} talla ${p.size}`).join(", ")}\nPrendas: ${money(o.subtotalCents)}\nEnvío: ${money(o.shippingCents)}\nTotal: ${money(o.totalCents)}\nBanco: ${account.name}\nBeneficiario: ${account.beneficiary}\nCLABE: ${account.clabe}\nReferencia: ${o.id}\nEl pago se confirmará al verificar el abono en nuestra cuenta.`;
+}
+function emailDetails(card, order) {
+  const details = document.createElement("details");
+  details.append(text("summary", "Correos transaccionales"));
+  const results = document.createElement("div");
+  const refresh = text("button", "Consultar correos", "secondary");
+  refresh.type = "button";
+  const states = {
+    pending: "En cola", sending: "En proceso", accepted: "Aceptado por Resend; entrega no confirmada",
+    failed: "Falló", uncertain: "Resultado incierto", review: "Requiere revisión en Resend",
+    skipped: "Omitido", superseded: "Omitido por un estado posterior",
+  };
+  async function refreshEmails() {
+    refresh.disabled = true;
+    try {
+      const data = await api("/api/admin/email-notifications?orderId=" + encodeURIComponent(order.id));
+      results.replaceChildren(text("p", !data.healthy ? "Registro de correos no disponible. Revisa el servidor antes de reintentar." :
+        data.enabled ? "Envío habilitado. La aceptación del proveedor no confirma la recepción en el buzón." : "Correos desactivados o configuración incompleta."));
+      for (const job of data.notifications) {
+        const row = document.createElement("p");
+        row.append(text("span", `${labels[job.event] || job.event} · ${job.audience === "owner" ? "Propietario" : "Comprador"} · ${states[job.state] || job.state} · Intentos: ${job.attempts} · ${job.code}`));
+        if (job.canRetry) {
+          const retry = text("button", "Reintentar con la misma referencia", "secondary");
+          retry.type = "button";
+          retry.onclick = async () => {
+            retry.disabled = true;
+            try {
+              await api(`/api/admin/email-notifications/${job.id}/retry`, { method: "POST", body: "{}" });
+              await refreshEmails();
+            } catch (e) { results.append(text("p", e.message)); }
+          };
+          row.append(retry);
+        }
+        results.append(row);
+      }
+    } catch (e) { results.replaceChildren(text("p", e.message)); }
+    finally { refresh.disabled = false; }
+  }
+  refresh.onclick = refreshEmails;
+  details.append(refresh, results);
+  card.append(details);
 }
 function render() {
   const filtered = loaded;
@@ -554,6 +595,7 @@ function render() {
         ),
       );
     card.append(history);
+    emailDetails(card, o);
     $("#orders").append(card);
   }
 }
@@ -569,6 +611,8 @@ $("#login-form").onsubmit = async (e) => {
     $("#password").value = "";
     $("#admin-message").textContent = "";
     await load();
+    // load() already fetched the orders page; the visible tab loads itself.
+    if (currentView !== "orders") await switchView(currentView);
   } catch (e) {
     $("#admin-message").textContent = e.message;
   } finally {
@@ -598,8 +642,6 @@ function filterOrders() {
 }
 $("#search").oninput = filterOrders;
 $("#status-filter").onchange = filterOrders;
-$("#refresh").onclick = () =>
-  load().catch((e) => ($("#admin-message").textContent = e.message));
 $("#previous").onclick = () => {
   page = Math.max(0, page - 1);
   $("#refresh").click();
@@ -608,7 +650,456 @@ $("#next").onclick = () => {
   page++;
   $("#refresh").click();
 };
-load().catch((e) => {
-  if (!e.message.includes("Inicia sesión"))
-    $("#admin-message").textContent = e.message;
+load()
+  .then(() => (currentView === "orders" ? undefined : switchView(currentView)))
+  .catch((e) => {
+    if (!e.message.includes("Inicia sesión"))
+      $("#admin-message").textContent = e.message;
+  });
+
+// ---------- Dashboard: secciones ----------
+const STATUS_LABELS = { draft: "Borrador", published: "Publicado", archived: "Archivado" };
+let currentView = "summary",
+  movementVariant = null;
+
+const views = {
+  summary: { title: "Resumen.", load: loadSummary },
+  orders: { title: "Pedidos.", load },
+  products: { title: "Productos.", load: loadProducts },
+  inventory: { title: "Inventario.", load: loadInventory },
+  shipping: { title: "Envíos.", load: loadShipping },
+  settings: { title: "Configuración.", load: loadSettings },
+};
+
+function switchView(name) {
+  if (!views[name]) return;
+  currentView = name;
+  for (const key of Object.keys(views)) {
+    const active = key === name;
+    const tab = document.getElementById("tab-" + key);
+    const panel = document.getElementById("view-" + key);
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
+    panel.hidden = !active;
+  }
+  $("#view-title").textContent = views[name].title;
+  views[name].load().catch((e) => ($("#admin-message").textContent = e.message));
+}
+
+document.querySelectorAll('[role="tab"]').forEach((tab) => {
+  tab.onclick = () => switchView(tab.id.replace("tab-", ""));
+  tab.onkeydown = (event) => {
+    const tabs = [...document.querySelectorAll('[role="tab"]')];
+    const index = tabs.indexOf(tab);
+    let next = null;
+    if (event.key === "ArrowRight") next = tabs[(index + 1) % tabs.length];
+    if (event.key === "ArrowLeft") next = tabs[(index - 1 + tabs.length) % tabs.length];
+    if (event.key === "Home") next = tabs[0];
+    if (event.key === "End") next = tabs[tabs.length - 1];
+    if (!next) return;
+    event.preventDefault();
+    next.focus();
+    switchView(next.id.replace("tab-", ""));
+  };
 });
+
+function statCard(label, value, note) {
+  const card = document.createElement("article");
+  card.className = "stat-card";
+  card.append(text("p", label, "eyebrow"), text("strong", String(value)));
+  if (note) card.append(text("p", note, "fine"));
+  return card;
+}
+
+async function loadSummary() {
+  const data = await api("/api/admin/summary");
+  const grid = $("#summary-cards");
+  grid.replaceChildren(
+    statCard("Pedidos pendientes", data.orders.pending, "Solicitudes recibidas sin confirmar."),
+    statCard("Pagos por verificar", data.orders.awaitingPayment, "Transferencias sin comprobar en el banco."),
+    statCard("Variantes con stock bajo", data.inventory.lowStockVariants, `${data.inventory.lowStockUnits} unidades disponibles en esas variantes.`),
+    statCard("Pedidos por preparar", data.orders.toPrepare, "Pago verificado, sin entregar a FedEx."),
+    statCard("Envíos pendientes", data.orders.pendingShipments, "En tránsito sin entrega confirmada."),
+  );
+  const note = $("#summary-inventory-note");
+  note.replaceChildren();
+  if (data.inventory.unconfiguredVariants) {
+    note.hidden = false;
+    const count = data.inventory.unconfiguredVariants;
+    note.append(
+      text(
+        "span",
+        `${count} ${count === 1 ? "variante no tiene" : "variantes no tienen"} existencias configuradas. Mientras siga así, los pedidos se aceptan sin control de stock.`,
+      ),
+    );
+    const go = text("button", "Configurar inventario →", "secondary");
+    go.onclick = () => switchView("inventory");
+    note.append(go);
+  } else {
+    note.hidden = true;
+  }
+}
+
+function statusBadge(status) {
+  return text("span", STATUS_LABELS[status] || status, "badge badge-" + status);
+}
+
+function productCard(product) {
+  const card = document.createElement("article");
+  card.className = "product-card";
+  const head = document.createElement("div");
+  head.className = "product-card-head";
+  head.append(text("h2", product.name), statusBadge(product.status));
+  card.append(head);
+  card.append(
+    text(
+      "p",
+      `${money(product.priceCents)} · ${product.variants.filter((v) => v.status === "active").length} variantes activas · ${product.variants.length} en total`,
+      "fine",
+    ),
+  );
+  const list = document.createElement("ul");
+  list.className = "variant-list";
+  for (const variant of product.variants) {
+    const stock =
+      variant.status !== "active"
+        ? "archivada"
+        : !variant.configured
+          ? "sin inventario configurado"
+          : `${variant.available} disponibles · ${variant.onHand} físicas · ${variant.reserved} reservadas`;
+    list.append(
+      text("li", `${variant.size} · ${variant.color || "sin color"} · ${variant.sku} · ${stock}`),
+    );
+  }
+  card.append(list);
+  const actions = document.createElement("div");
+  actions.className = "card-actions";
+  const edit = text("button", "Editar", "secondary");
+  edit.onclick = () => openProduct(product);
+  actions.append(edit);
+  if (product.status !== "archived") {
+    const toggle = text(
+      "button",
+      product.status === "published" ? "Despublicar" : "Publicar",
+      "secondary",
+    );
+    toggle.onclick = () =>
+      setProductStatus(product.id, product.status === "published" ? "draft" : "published", toggle);
+    actions.append(toggle);
+    const archive = text("button", "Archivar", "secondary");
+    archive.onclick = () => setProductStatus(product.id, "archived", archive);
+    actions.append(archive);
+  } else {
+    const restore = text("button", "Volver a borrador", "secondary");
+    restore.onclick = () => setProductStatus(product.id, "draft", restore);
+    actions.append(restore);
+  }
+  card.append(actions);
+  return card;
+}
+
+async function loadProducts() {
+  const data = await api("/api/admin/products");
+  const host = $("#products-list");
+  host.replaceChildren();
+  if (!data.products.length) {
+    host.append(text("p", "Todavía no hay productos. Crea el primero.", "notice"));
+    return;
+  }
+  for (const product of data.products) host.append(productCard(product));
+}
+
+async function setProductStatus(id, status, button) {
+  button.disabled = true;
+  try {
+    await api(`/api/admin/products/${id}/status`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
+    });
+    await loadProducts();
+    $("#admin-message").textContent =
+      status === "archived"
+        ? "Producto archivado. Los pedidos anteriores no cambian."
+        : "Estado actualizado.";
+  } catch (e) {
+    $("#admin-message").textContent = e.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function variantRow(variant = {}) {
+  const row = document.createElement("div");
+  row.className = "variant-row";
+  if (variant.id) row.dataset.id = variant.id;
+  const fields = [
+    ["size", "Talla", variant.size ?? "", 6],
+    ["color", "Color", variant.color ?? "", 40],
+    ["sku", "SKU", variant.sku ?? "", 40],
+  ];
+  for (const [name, label, value, max] of fields) {
+    const wrapper = document.createElement("label");
+    wrapper.append(text("span", label));
+    const field = document.createElement("input");
+    field.dataset.variant = name;
+    field.value = value;
+    field.maxLength = max;
+    if (name === "size") field.required = true;
+    if (name === "sku") field.required = true;
+    wrapper.append(field);
+    row.append(wrapper);
+  }
+  const state = document.createElement("label");
+  state.append(text("span", "Estado"));
+  const select = document.createElement("select");
+  select.dataset.variant = "status";
+  select.append(new Option("Activa", "active"), new Option("Archivada", "archived"));
+  select.value = variant.status === "archived" ? "archived" : "active";
+  state.append(select);
+  row.append(state);
+  const remove = text("button", "Quitar", "secondary");
+  remove.type = "button";
+  remove.onclick = () => row.remove();
+  row.append(remove);
+  return row;
+}
+
+function openProduct(product = null) {
+  $("#product-dialog-title").textContent = product ? "Editar producto" : "Nuevo producto";
+  $("#p-name").value = product?.name ?? "";
+  $("#p-price").value = product ? (product.priceCents / 100).toFixed(2) : "";
+  $("#p-color").value = product?.color ?? "";
+  $("#p-composition").value = product?.composition ?? "";
+  $("#p-weight").value = product?.fabricWeightGsm ?? "";
+  $("#p-fit").value = product?.fit ?? "";
+  $("#p-status").value = product?.status ?? "draft";
+  $("#p-description").value = product?.description ?? "";
+  $("#p-images").value = (product?.images ?? [{ src: "assets/product-front.jpg", alt: "" }])
+    .map((image) => `${image.src}${image.alt ? " | " + image.alt : ""}`)
+    .join("\n");
+  const rows = $("#variant-rows");
+  rows.replaceChildren();
+  const variants = product?.variants?.length
+    ? product.variants
+    : [{ size: "", color: product?.color ?? "", sku: "" }];
+  for (const variant of variants) rows.append(variantRow(variant));
+  $("#product-error").textContent = "";
+  $("#product-dialog").showModal();
+}
+
+function parseImages(value) {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [src, ...rest] = line.split("|");
+      return { src: src.trim(), alt: rest.join("|").trim() };
+    });
+}
+
+$("#add-variant").onclick = () => $("#variant-rows").append(variantRow());
+$("#new-product").onclick = () => openProduct();
+$("#cancel-product").onclick = () => $("#product-dialog").close();
+
+$("#product-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  const variants = [...document.querySelectorAll("#variant-rows .variant-row")].map((row) => ({
+    ...(row.dataset.id ? { id: row.dataset.id } : {}),
+    size: row.querySelector('[data-variant="size"]').value,
+    color: row.querySelector('[data-variant="color"]').value,
+    sku: row.querySelector('[data-variant="sku"]').value,
+    status: row.querySelector('[data-variant="status"]').value,
+  }));
+  const body = {
+    name: $("#p-name").value,
+    description: $("#p-description").value,
+    color: $("#p-color").value,
+    composition: $("#p-composition").value,
+    fabricWeightGsm: $("#p-weight").value === "" ? null : Number($("#p-weight").value),
+    fit: $("#p-fit").value,
+    priceCents: Math.round(Number($("#p-price").value) * 100),
+    status: $("#p-status").value,
+    images: parseImages($("#p-images").value),
+    variants,
+  };
+  button.disabled = true;
+  $("#product-error").textContent = "";
+  try {
+    const id = $("#product-dialog").dataset.productId;
+    if (id)
+      await api(`/api/admin/products/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+    else await api("/api/admin/products", { method: "POST", body: JSON.stringify(body) });
+    $("#product-dialog").close();
+    $("#admin-message").textContent = id
+      ? "Producto actualizado."
+      : "Producto creado. Publícalo cuando esté listo.";
+    await loadProducts();
+    if (currentView === "inventory") await loadInventory();
+  } catch (e) {
+    $("#product-error").textContent = e.message;
+  } finally {
+    button.disabled = false;
+  }
+};
+
+// Guarda el id que se está editando junto al diálogo; openProduct(null) = alta.
+const openProductForm = openProduct;
+openProduct = function (product = null) {
+  $("#product-dialog").dataset.productId = product?.id ?? "";
+  openProductForm(product);
+};
+
+function td(value, label) {
+  const cell = document.createElement("td");
+  cell.textContent = value;
+  if (label) cell.dataset.label = label;
+  return cell;
+}
+
+async function loadInventory() {
+  const data = await api("/api/admin/inventory");
+  const rows = $("#inventory-rows");
+  rows.replaceChildren();
+  for (const variant of data.variants) {
+    const tr = document.createElement("tr");
+    const low =
+      variant.configured && variant.available <= variant.lowStockThreshold && variant.status === "active";
+    if (variant.status !== "active") tr.className = "is-archived";
+    else if (low) tr.className = "is-low";
+    tr.append(
+      td(variant.productName, "Producto"),
+      td(variant.size, "Talla"),
+      td(variant.color || "—", "Color"),
+      td(variant.sku, "SKU"),
+      td(variant.configured ? String(variant.onHand) : "—", "Físico"),
+      td(variant.configured ? String(variant.reserved) : "—", "Reservado"),
+      td(variant.configured ? String(variant.available) : "Sin configurar", "Disponible"),
+      td(variant.configured ? String(variant.lowStockThreshold) : "—", "Umbral"),
+    );
+    const actions = document.createElement("td");
+    const button = text("button", "Movimientos", "secondary");
+    button.onclick = () => openMovement(variant);
+    actions.append(button);
+    tr.append(actions);
+    rows.append(tr);
+  }
+  const unconfigured = data.variants.filter((v) => !v.configured && v.status === "active").length;
+  const note = $("#inventory-note");
+  note.hidden = !unconfigured;
+  note.textContent = unconfigured
+    ? `${unconfigured} ${unconfigured === 1 ? "variante sigue" : "variantes siguen"} sin existencias configuradas. Registra una entrada con el conteo real para activar el control de stock.`
+    : "";
+}
+
+async function loadHistory(variantId) {
+  const host = $("#movement-history");
+  const data = await api(`/api/admin/inventory/${variantId}/movements`);
+  host.replaceChildren();
+  if (!data.movements.length) {
+    host.append(text("p", "Sin movimientos registrados.", "fine"));
+    return;
+  }
+  for (const movement of data.movements) {
+    const sign = movement.qty > 0 ? "+" : "";
+    host.append(
+      text(
+        "p",
+        `${new Date(movement.createdAt).toLocaleString("es-MX")} · ${movement.type} ${sign}${movement.qty}${
+          movement.reservedDelta ? ` · reservado ${movement.reservedDelta > 0 ? "+" : ""}${movement.reservedDelta}` : ""
+        }${movement.reason ? " · " + movement.reason : ""} · físico ${movement.onHandAfter} · reservado ${movement.reservedAfter}${
+          movement.orderId ? " · " + movement.orderId : ""
+        }`,
+        "fine",
+      ),
+    );
+  }
+}
+
+async function openMovement(variant) {
+  movementVariant = variant;
+  $("#movement-variant").textContent = `${variant.productName} · Talla ${variant.size} · ${variant.color || "sin color"} · ${variant.sku}`;
+  $("#m-qty").value = "";
+  $("#m-reason").value = "";
+  $("#movement-error").textContent = "";
+  $("#t-threshold").value = variant.lowStockThreshold;
+  $("#movement-history").replaceChildren(text("p", "Cargando…", "fine"));
+  $("#movement-dialog").showModal();
+  await loadHistory(variant.id);
+}
+
+$("#movement-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled = true;
+  $("#movement-error").textContent = "";
+  try {
+    await api(`/api/admin/inventory/${movementVariant.id}/movements`, {
+      method: "POST",
+      body: JSON.stringify({
+        type: $("#m-type").value,
+        qty: Number($("#m-qty").value),
+        reason: $("#m-reason").value,
+      }),
+    });
+    $("#m-qty").value = "";
+    $("#m-reason").value = "";
+    await loadInventory();
+    await loadHistory(movementVariant.id);
+  } catch (e) {
+    $("#movement-error").textContent = e.message;
+  } finally {
+    button.disabled = false;
+  }
+};
+
+$("#threshold-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    await api(`/api/admin/inventory/${movementVariant.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ lowStockThreshold: Number($("#t-threshold").value) }),
+    });
+    await loadInventory();
+    $("#movement-error").textContent = "";
+    $("#admin-message").textContent = "Umbral actualizado.";
+  } catch (e) {
+    $("#movement-error").textContent = e.message;
+  } finally {
+    button.disabled = false;
+  }
+};
+
+async function loadShipping() {
+  const data = await api("/api/admin/summary");
+  const value = data.shipping ?? {};
+  $("#shipping-panel-status").textContent = value.enabled
+    ? `Envia configurado · Solo FedEx · ${
+        value.environment === "sandbox"
+          ? "PRUEBAS: las guías no tienen validez para enviar."
+          : "Producción: comprar una guía genera un cargo real."
+      }`
+    : "Envia pendiente de configuración: los pedidos se guardan sin tarifa de envío y no se puede comprar guía.";
+}
+
+document.querySelectorAll("[data-order-filter]").forEach((button) => {
+  button.onclick = () => {
+    $("#status-filter").value = button.dataset.orderFilter;
+    page = 0;
+    switchView("orders");
+  };
+});
+
+async function loadSettings() {
+  const data = await api("/api/admin/summary");
+  const value = data.shipping ?? {};
+  $("#settings-envia-status").textContent = value.enabled
+    ? `Envia: ${value.environment === "sandbox" ? "sandbox (pruebas)" : "producción"}.`
+    : "Envia: pendiente de configuración.";
+}
+
+$("#refresh").onclick = () =>
+  views[currentView].load().catch((e) => ($("#admin-message").textContent = e.message));

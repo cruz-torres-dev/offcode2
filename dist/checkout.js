@@ -25,27 +25,27 @@ try {
 } catch {
   items = [];
 }
-const valid =
-  Array.isArray(items) &&
-  items.length > 0 &&
-  items.length <= 4 &&
-  items.every(
-    (p) =>
-      ["S", "M", "L", "XL"].includes(p.size) &&
-      Number.isInteger(p.qty) &&
-      p.qty >= 1 &&
-      p.qty <= 99,
+// Mirrors server/catalog.mjs until /api/config answers with the sale sizes.
+const FALLBACK_SALE_SIZES = ["S", "M", "L", "XL"];
+function validBag(saleSizes) {
+  return (
+    Array.isArray(items) &&
+    items.length > 0 &&
+    items.length <= saleSizes.length &&
+    items.every(
+      (p) =>
+        saleSizes.includes(p.size) &&
+        Number.isInteger(p.qty) &&
+        p.qty >= 1 &&
+        p.qty <= 99,
+    )
   );
+}
 async function init() {
-  if (!valid) {
+  if (!Array.isArray(items) || !items.length) {
     $("#availability").textContent =
       "Tu bolsa está vacía o no es válida. Vuelve a la colección para elegir talla y cantidad.";
     return;
-  }
-  for (const item of items) {
-    const p = document.createElement("p");
-    p.textContent = `Talla ${item.size} · ${item.qty} ${item.qty === 1 ? "prenda" : "prendas"}`;
-    $("#order-items").append(p);
   }
   try {
     const r = await fetch("/api/config");
@@ -55,6 +55,20 @@ async function init() {
     $("#availability").textContent =
       "La recepción de pedidos no está conectada en esta vista. Puedes seguir explorando la colección.";
     return;
+  }
+  const saleSizes =
+    Array.isArray(config.product?.saleSizes) && config.product.saleSizes.length
+      ? config.product.saleSizes
+      : FALLBACK_SALE_SIZES;
+  if (!validBag(saleSizes)) {
+    $("#availability").textContent =
+      "Tu bolsa incluye una talla que no está habilitada para venta. Vuelve a la colección para elegirla de nuevo.";
+    return;
+  }
+  for (const item of items) {
+    const p = document.createElement("p");
+    p.textContent = `Talla ${item.size} · ${item.qty} ${item.qty === 1 ? "prenda" : "prendas"}`;
+    $("#order-items").append(p);
   }
   $("#order-subtotal").textContent =
     "Subtotal: " +
@@ -179,7 +193,14 @@ $("#order-form").addEventListener("submit", async (e) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         requestKey: key,
-        items: items.map((p) => ({ size: p.size, qty: p.qty })),
+        // The exact variant is sent when known; the server still validates
+        // existence, price and stock before creating the order.
+        items: items.map((p) => ({
+          size: p.size,
+          qty: p.qty,
+          ...(typeof p.variantId === "string" && p.variantId ? { variantId: p.variantId } : {}),
+          ...(typeof p.productId === "string" && p.productId ? { productId: p.productId } : {}),
+        })),
         customer: data,
         consent: data.consent === "on",
         shippingQuoteId: selectedRate?.id,

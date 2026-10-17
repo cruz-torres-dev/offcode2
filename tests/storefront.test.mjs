@@ -104,12 +104,18 @@ test("Caché solo de catálogo y recursos públicos, revalidación ETag y API/ch
       "/",
       "/app.js",
       "/styles.css",
+      "/motion.css",
+      "/motion.js",
       "/assets/offcode-original.glb",
       "/assets/campaign.mp4",
     ]) {
       const r = await fetch(base + route, { method: "HEAD" });
       assert.equal(r.status, 200);
       assert.match(r.headers.get("cache-control"), /public/);
+      if (route.startsWith("/motion.")) {
+        assert.equal(r.headers.get("cache-control"), "public, max-age=0, s-maxage=300, must-revalidate");
+        assert.ok(r.headers.get("etag"));
+      }
       assert.equal(r.headers.get("set-cookie"), null);
       const conditional = await fetch(base + route, {
         headers: { "If-None-Match": r.headers.get("etag") },
@@ -122,6 +128,8 @@ test("Caché solo de catálogo y recursos públicos, revalidación ETag y API/ch
       "/admin.html",
       "/checkout.html",
       "/admin.js",
+      "/settings.html",
+      "/settings.js",
       "/checkout.js",
       "/missing.jpg",
     ]) {
