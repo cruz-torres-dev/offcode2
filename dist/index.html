@@ -17,9 +17,6 @@
   </head>
   <body>
     <a class="skip-link" href="#collection">Saltar a la colección</a>
-    <div class="notice" id="site-notice">
-      TIENDA DE DEMOSTRACIÓN · SIN COBROS
-    </div>
     <header id="top">
       <button id="menu-toggle" aria-expanded="false" aria-controls="main-nav">
         Menú <span>＋</span>
@@ -149,7 +146,7 @@
             <button
               class="product-image"
               id="product-open"
-              aria-label="Ampliar vista frontal de la sudadera"
+              aria-label="Ampliar fotograf&#237;a del producto: frente" aria-haspopup="dialog" aria-controls="product-modal"
             >
               <img
                 loading="lazy"
@@ -158,7 +155,7 @@
                 id="gallery-main"
                 src="assets/product-front.jpg"
                 alt="Frente de la sudadera LA AFRO × OFFCODE"
-              /><span>AMPLIAR IMAGEN ↗</span>
+              /><span class="zoom-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M7.5 10.5h6m-3-3v6"/></svg></span>
             </button>
             <div class="gallery-controls">
               <button id="photo-prev" aria-label="Foto anterior">←</button
@@ -343,7 +340,7 @@
       <button id="checkout" class="button dark">Probar pedido →</button>
       <p id="checkout-message" role="status"></p>
     </dialog>
-    <dialog id="product-modal">
+    <dialog id="product-modal" aria-label="Fotograf&#237;a ampliada del producto">
       <div class="dialog-head">
         <h2>LA AFRO × OFFCODE</h2>
         <button class="close" aria-label="Cerrar foto">✕</button>

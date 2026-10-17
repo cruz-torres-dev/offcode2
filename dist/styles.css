@@ -70,15 +70,6 @@ img {
 .skip-link:focus {
   top: 12px;
 }
-.notice {
-  text-align: center;
-  background: #000;
-  color: var(--muted);
-  border-bottom: 1px solid #1c1c1c;
-  font-size: 9px;
-  letter-spacing: 2px;
-  padding: 10px 12px;
-}
 header {
   position: sticky;
   top: 0;
@@ -89,7 +80,7 @@ header {
   backdrop-filter: blur(14px) saturate(120%);
   border-bottom: 1px solid var(--line);
   display: grid;
-  grid-template-columns: 1fr 210px 1fr;
+  grid-template-columns: minmax(0, 1fr) 210px minmax(0, 1fr);
   align-items: center;
   padding: 0 4%;
 }
@@ -212,7 +203,7 @@ model-viewer {
   display: none;
 }
 .hero {
-  height: min(780px, calc(100svh - 161px));
+  height: min(780px, calc(100svh - 130px));
   min-height: 540px;
   position: relative;
   background: var(--bg);
@@ -406,26 +397,25 @@ h2 {
     transform: scale(1.035);
   }
 }
-.product-image > span {
+/* One existing photo button, with a visible magnifier instead of a second control. */
+.product-image > .zoom-icon {
   position: absolute;
-  bottom: 20px;
-  left: 20px;
-  z-index: 2;
-  background: #fffd;
-  color: var(--ink);
-  padding: 8px;
-  font-size: 8px;
-  letter-spacing: 1.2px;
-  transition:
-    background-color 0.3s var(--ease),
-    color 0.3s var(--ease);
+  top: 16px;
+  right: 16px;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fffffff0;
+  color: #161616;
+  border: 1px solid #c4c4c4;
+  transition: background 180ms, border-color 180ms;
 }
-@media (hover: hover) {
-  .product-image:hover > span {
-    background: var(--ink);
-    color: var(--text);
-  }
-}
+.zoom-icon svg { width: 21px; height: 21px; }
+.product-image:hover .zoom-icon,
+.product-image:focus-visible .zoom-icon { background: #fff; border-color: #161616; }
+#main-nav { justify-content: center; gap: clamp(14px, 2vw, 30px); }
 .gallery-controls {
   display: flex;
   justify-content: space-between;
@@ -903,12 +893,8 @@ body:has(dialog[open]) {
   }
   header {
     height: 112px;
-    grid-template-columns: 1fr 150px 1fr;
+    grid-template-columns: minmax(0, 1fr) 150px minmax(0, 1fr);
     padding: 0 5%;
-  }
-  .notice {
-    font-size: 8px;
-    letter-spacing: 1.3px;
   }
   .brand > a {
     width: 148px;
@@ -945,6 +931,7 @@ body:has(dialog[open]) {
     border-bottom: 1px solid var(--line);
     font-size: 14px;
   }
+  #main-nav { gap: 0; }
   nav.open {
     display: flex;
     flex-direction: column;
@@ -955,10 +942,11 @@ body:has(dialog[open]) {
     padding: 15px 0;
   }
   #bag {
+    padding: 12px 0;
     font-size: 11px;
   }
   .hero {
-    height: calc(100svh - 141px);
+    height: calc(100svh - 112px);
     min-height: 520px;
     max-height: 850px;
   }
