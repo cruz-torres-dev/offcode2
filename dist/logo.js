@@ -24,6 +24,9 @@ control.onclick = () => {
 viewer.addEventListener("load", () => {
   // Retain the original geometry; soften the mirror finish for restrained reflections.
   viewer.model?.materials.forEach((material) => {
+    if (viewer.dataset.finish === "silver") {
+      material.pbrMetallicRoughness.setBaseColorFactor([0.62, 0.62, 0.62, 1]);
+    }
     material.pbrMetallicRoughness.setRoughnessFactor(0.32);
     material.pbrMetallicRoughness.setMetallicFactor(0.85);
   });

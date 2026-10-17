@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      name="description"
+      content="Entra a la lista VIP de OFFCODE. Recibe primero el aviso del próximo lanzamiento."
+    />
+    <title>OFFCODE™ — Lista VIP</title>
+    <link rel="icon" href="assets/monogram-static.png" />
+    <link rel="stylesheet" href="teaser.css" />
+  </head>
+  <body>
+    <a class="skip" href="#teaser-main">Saltar al contenido</a>
+    <div class="reveal" aria-hidden="true"></div>
+    <header>
+      <a class="wordmark" href="index.html">OFFCODE<sup>™</sup></a
+      ><a
+        href="https://www.instagram.com/offcode_tm/"
+        target="_blank"
+        rel="noopener"
+        >@offcode_tm ↗</a
+      >
+    </header>
+    <main id="teaser-main">
+      <div class="frame" aria-hidden="true">
+        <span>OFFCODE / PRIVATE LIST</span
+        ><span>EL PRÓXIMO LANZAMIENTO EMPIEZA AQUÍ</span>
+      </div>
+      <div class="brand">
+        <a href="#vip-form" aria-label="Ir al registro de la lista VIP"
+          ><img
+            class="logo-static"
+            src="assets/monogram-static.png"
+            alt="Monograma original Of"
+            width="860"
+            height="768" /><model-viewer
+            id="logo-model"
+            data-finish="silver"
+            src="assets/offcode-original.glb"
+            alt="Monograma Of en tres dimensiones"
+            auto-rotate
+            auto-rotate-delay="0"
+            rotation-per-second="60deg"
+            camera-orbit="0deg 90deg 58m"
+            camera-target="0m 0m 0m"
+            field-of-view="30deg"
+            exposure="1.2"
+            shadow-intensity="0"
+            environment-image="neutral"
+            interaction-prompt="none"
+            loading="eager"
+            aria-hidden="true"
+          ></model-viewer
+        ></a>
+        <button id="motion" aria-pressed="false">Pausar giro</button>
+      </div>
+      <div class="copy">
+        <p class="eyebrow">
+          <span class="access-marker" aria-hidden="true"></span> ACCESO
+          ANTICIPADO / OFFCODE
+        </p>
+        <h1>El próximo drop.<br /><span>Tú, primero.</span></h1>
+        <p class="caption">
+          Entra a la lista VIP de OFFCODE y recibe primero el aviso del próximo
+          lanzamiento.
+        </p>
+        <form
+          id="vip-form"
+          method="post"
+          action="/api/waitlist"
+          aria-label="Registro a la lista VIP"
+          aria-describedby="vip-message vip-fine"
+        >
+          <label class="email-label" for="vip-email"
+            >Tu correo. Tu entrada.</label
+          >
+          <div class="email-field">
+            <input
+              id="vip-email"
+              name="email"
+              type="email"
+              autocomplete="email"
+              placeholder="tu@correo.com"
+              required
+              maxlength="150"
+              disabled
+            /><span aria-hidden="true">↗</span>
+          </div>
+          <div class="honey" aria-hidden="true">
+            <label
+              >Deja este campo vacío<input
+                name="website"
+                tabindex="-1"
+                autocomplete="off"
+            /></label>
+          </div>
+          <label class="vip-consent"
+            ><input
+              id="vip-consent"
+              name="consent"
+              type="checkbox"
+              required
+              disabled
+            /><span
+              >Quiero recibir novedades y avisos de lanzamiento de OFFCODE por
+              correo. He leído el
+              <a id="vip-privacy" hidden target="_blank" rel="noopener"
+                >aviso de privacidad</a
+              ><span id="privacy-unavailable">aviso de privacidad</span>.</span
+            ></label
+          >
+          <button class="enter" id="vip-submit" disabled>
+            <span>Quiero estar dentro</span><span aria-hidden="true">→</span>
+          </button>
+        </form>
+        <section id="vip-success" hidden tabindex="-1">
+          <p class="eyebrow">OFFCODE / PRIVATE LIST</p>
+          <h2>Solicitud recibida.</h2>
+          <p>
+            Gracias por querer formar parte de OFFCODE. Si ya te habías
+            registrado, mantendremos una sola entrada.
+          </p>
+          <button id="vip-reset" type="button">Usar otro correo ↗</button>
+        </section>
+        <p
+          id="vip-message"
+          class="preview-note"
+          role="status"
+          aria-live="polite"
+        >
+          El registro abrirá próximamente.
+        </p>
+        <p id="vip-fine" class="vip-fine">
+          Solo OFFCODE. Sin compra obligatoria.<br />Puedes solicitar la baja
+          por
+          <a
+            href="https://www.instagram.com/offcode_tm/"
+            target="_blank"
+            rel="noopener"
+            >Instagram</a
+          >
+          o por el medio indicado en el aviso de privacidad.
+        </p>
+      </div>
+      <div class="editorial" aria-hidden="true">
+        <img
+          src="assets/editorial-detail.jpg"
+          alt=""
+          width="1170"
+          height="1560"
+        /><span>THE SIGNATURE / Of</span>
+      </div>
+    </main>
+    <footer>
+      <span>OFFCODE™</span><span>ANTES DEL RUIDO. DENTRO DEL CÓDIGO.</span
+      ><span>PRIVATE LIST</span>
+    </footer>
+    <script type="module" src="logo.js"></script>
+    <script src="teaser.js" defer></script>
+  </body>
+</html>

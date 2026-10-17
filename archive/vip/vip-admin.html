@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Lista VIP — OFFCODE</title>
+    <link rel="icon" href="assets/monogram-static.png" />
+    <link rel="stylesheet" href="operations.css" />
+  </head>
+  <body>
+    <header>
+      <a class="wordmark" href="index.html">OFFCODE™</a
+      ><a href="admin.html">Pedidos y envíos ↗</a
+      ><button id="logout" hidden>Cerrar sesión</button>
+    </header>
+    <main class="admin-layout">
+      <section id="login">
+        <p class="eyebrow">PRIVATE LIST / ACCESO PRIVADO</p>
+        <h1>Antes del lanzamiento.</h1>
+        <p class="intro">
+          Consulta los correos registrados y gestiona las bajas.
+        </p>
+        <form id="login-form">
+          <label
+            >Contraseña de administración<input
+              id="password"
+              type="password"
+              autocomplete="current-password"
+              required
+              minlength="16"
+              maxlength="256" /></label
+          ><button class="primary">Entrar a la lista →</button>
+        </form>
+      </section>
+      <p id="vip-admin-message" class="message" role="status"></p>
+      <section id="member-panel" hidden>
+        <div class="dashboard-head">
+          <div>
+            <p class="eyebrow">OFFCODE / PRIVATE LIST</p>
+            <h1>La lista VIP.</h1>
+          </div>
+          <button id="refresh">Actualizar ↻</button>
+        </div>
+        <p class="intro">
+          Registros con consentimiento, sin verificación del correo. El envío de
+          campañas y las confirmaciones por email aún no están conectados.
+        </p>
+        <p id="collection-status" class="fine"></p>
+        <div class="vip-toolbar">
+          <label
+            >Registros<select id="member-status">
+              <option value="active">Activos</option>
+              <option value="withdrawn">Dados de baja</option>
+            </select></label
+          ><a
+            class="secondary"
+            href="/api/admin/waitlist.csv"
+            download="offcode-vip.csv"
+            >Descargar correos activos (CSV) ↓</a
+          >
+        </div>
+        <p id="member-count" class="total"></p>
+        <div id="members"></div>
+        <div class="pagination">
+          <button id="previous">← Anteriores</button
+          ><span id="page-number"></span><button id="next">Siguientes →</button>
+        </div>
+        <p class="fine">
+          El CSV contiene datos personales y consentimiento. No lo publiques ni
+          lo subas al repositorio. Las bajas quedan excluidas del archivo.
+        </p>
+      </section>
+    </main>
+    <footer>
+      OFFCODE™ · Lista privada · Ningún correo se envía automáticamente.
+    </footer>
+    <script src="vip-admin.js" defer></script>
+  </body>
+</html>

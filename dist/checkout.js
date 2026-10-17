@@ -1,0 +1,214 @@
+const $ = (s) => document.querySelector(s);
+const money = (cents) =>
+  new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(
+    cents / 100,
+  ) + " MXN";
+let items = [],
+  config,
+  key,
+  selectedRate = null;
+const subtotal = () => items.reduce((s, p) => s + p.qty * config.unitCents, 0);
+const form = $("#order-form");
+function clearRates() {
+  selectedRate = null;
+  $("#shipping-rates").replaceChildren();
+  $("#shipping-message").textContent =
+    "Consulta FedEx después de completar tus datos y aceptar el aviso de privacidad.";
+  $("#shipping-summary").textContent = "Envío pendiente de cotizar.";
+  $("#shipping-summary").className = "fine";
+  $("#submit-order").disabled = true;
+}
+try {
+  items = JSON.parse(sessionStorage.getItem("offcode-bag") ?? "[]");
+  key = sessionStorage.getItem("offcode-request-key") || crypto.randomUUID();
+  sessionStorage.setItem("offcode-request-key", key);
+} catch {
+  items = [];
+}
+const valid =
+  Array.isArray(items) &&
+  items.length > 0 &&
+  items.length <= 4 &&
+  items.every(
+    (p) =>
+      ["S", "M", "L", "XL"].includes(p.size) &&
+      Number.isInteger(p.qty) &&
+      p.qty >= 1 &&
+      p.qty <= 99,
+  );
+async function init() {
+  if (!valid) {
+    $("#availability").textContent =
+      "Tu bolsa está vacía o no es válida. Vuelve a la colección para elegir talla y cantidad.";
+    return;
+  }
+  for (const item of items) {
+    const p = document.createElement("p");
+    p.textContent = `Talla ${item.size} · ${item.qty} ${item.qty === 1 ? "prenda" : "prendas"}`;
+    $("#order-items").append(p);
+  }
+  try {
+    const r = await fetch("/api/config");
+    if (!r.ok) throw Error();
+    config = await r.json();
+  } catch {
+    $("#availability").textContent =
+      "La recepción de pedidos no está conectada en esta vista. Puedes seguir explorando la colección.";
+    return;
+  }
+  $("#order-subtotal").textContent =
+    "Subtotal: " +
+    money(items.reduce((s, p) => s + p.qty * config.unitCents, 0));
+  if (!config.enabled) {
+    $("#availability").textContent =
+      "Pedidos todavía no habilitados. No se guardarán datos ni se realizarán cobros.";
+    return;
+  }
+  $("#privacy-link").href = config.privacyUrl;
+  $("#terms-link").href = config.termsUrl;
+  $("#availability").textContent =
+    "Pago por transferencia bancaria. Primero confirmaremos tu solicitud y el envío.";
+  $("#order-form").hidden = false;
+  if (config.shipping?.enabled) {
+    $("#availability").textContent =
+      config.shipping.environment === "sandbox"
+        ? "PRUEBAS: tarifas y guías simuladas. No transfieras dinero."
+        : "Envíos por FedEx. Paga por transferencia después de que OFFCODE confirme disponibilidad y total.";
+    $("#shipping-section").hidden = false;
+    clearRates();
+    try {
+      const response = await fetch("/api/shipping/states");
+      const result = await response.json();
+      if (!response.ok) throw Error(result.error);
+      const select = document.createElement("select");
+      select.name = "state";
+      select.setAttribute("aria-label", "Estado");
+      select.required = true;
+      select.autocomplete = "address-level1";
+      select.append(new Option("Selecciona tu estado", ""));
+      for (const state of result.states)
+        select.append(new Option(state.name, state.code));
+      $("#state-text").replaceWith(select);
+    } catch {
+      $("#shipping-message").textContent =
+        "No se pudieron cargar los estados. Recarga la página para intentar de nuevo.";
+      $("#quote-shipping").disabled = true;
+    }
+  }
+}
+form.addEventListener("input", (e) => {
+  if (config?.shipping?.enabled && e.target.name !== "shipping-service")
+    clearRates();
+});
+$("#quote-shipping").onclick = async () => {
+  if (!form.reportValidity()) return;
+  clearRates();
+  const button = $("#quote-shipping");
+  button.disabled = true;
+  $("#shipping-message").textContent =
+    "Consultando cobertura y tarifas de FedEx…";
+  try {
+    const customerSnapshot = JSON.stringify(
+      Object.fromEntries(new FormData(form)),
+    );
+    const response = await fetch("/api/shipping/rates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        customer: JSON.parse(customerSnapshot),
+        items,
+        consent: true,
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok)
+      throw Error(result.error || "No se pudo cotizar el envío.");
+    if (
+      customerSnapshot !==
+      JSON.stringify(Object.fromEntries(new FormData(form)))
+    )
+      throw Error(
+        "Cambiaste tus datos durante la consulta. Vuelve a cotizar FedEx.",
+      );
+    for (const rate of result.rates) {
+      const label = document.createElement("label"),
+        radio = document.createElement("input"),
+        span = document.createElement("span");
+      label.className = "shipping-option";
+      radio.type = "radio";
+      radio.name = "shipping-service";
+      radio.value = rate.id;
+      span.textContent = `${rate.description} · ${money(rate.shippingCents)}${rate.deliveryEstimate ? " · Estimado: " + rate.deliveryEstimate : ""}`;
+      radio.onchange = () => {
+        selectedRate = rate;
+        $("#shipping-summary").textContent =
+          `Envío FedEx: ${money(rate.shippingCents)}\nTotal: ${money(subtotal() + rate.shippingCents)}`;
+        $("#shipping-summary").className = "shipping-total";
+        $("#submit-order").disabled = false;
+      };
+      label.append(radio, span);
+      $("#shipping-rates").append(label);
+    }
+    $("#shipping-message").textContent =
+      "Selecciona un servicio. La cotización vence en 15 minutos.";
+  } catch (e) {
+    $("#shipping-message").textContent = e.message;
+  } finally {
+    button.disabled = false;
+  }
+};
+$("#order-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!config?.enabled) return;
+  if (
+    config.shipping?.enabled &&
+    (!selectedRate || Date.parse(selectedRate.expiresAt) <= Date.now())
+  ) {
+    clearRates();
+    $("#shipping-message").textContent =
+      "Vuelve a cotizar FedEx antes de enviar la solicitud.";
+    return;
+  }
+  const button = $("#submit-order");
+  button.disabled = true;
+  button.textContent = "Guardando solicitud…";
+  const data = Object.fromEntries(new FormData(e.currentTarget));
+  try {
+    const response = await fetch("/api/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requestKey: key,
+        items: items.map((p) => ({ size: p.size, qty: p.qty })),
+        customer: data,
+        consent: data.consent === "on",
+        shippingQuoteId: selectedRate?.id,
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw Error(result.error || "No se pudo guardar.");
+    $("#order-reference").textContent = "Tu referencia: " + result.id;
+    $("#whatsapp-order").href =
+      "https://wa.me/" +
+      config.whatsapp +
+      "?text=" +
+      encodeURIComponent(
+        `Hola, quiero dar seguimiento a mi solicitud OFFCODE ${result.id}. Quedo pendiente de confirmar disponibilidad y envío antes de transferir.`,
+      );
+    $("#order-form").hidden = true;
+    $("#order-success").hidden = false;
+    $("#availability").textContent =
+      "Solicitud guardada. Aún no es una compra confirmada.";
+    $("#order-success").focus();
+    sessionStorage.removeItem("offcode-bag");
+    sessionStorage.removeItem("offcode-request-key");
+  } catch (error) {
+    $("#availability").textContent =
+      error.message + " Tu selección sigue disponible para reintentar.";
+  } finally {
+    button.disabled = false;
+    if (config.shipping?.enabled && !selectedRate) button.disabled = true;
+    button.textContent = "Solicitar pedido →";
+  }
+});
+init();

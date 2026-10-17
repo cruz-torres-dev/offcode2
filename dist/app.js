@@ -4,6 +4,7 @@ const money = (n) =>
   new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(
     n,
   ) + " MXN";
+let ordersEnabled = false;
 let size = "M",
   cart = [];
 const cartDialog = $("#cart");
@@ -44,11 +45,26 @@ function renderCart() {
   $("#cart-total").textContent =
     "Subtotal: " + money(cart.reduce((n, p) => n + p.qty * unitPrice, 0));
   $("#checkout").disabled = !cart.length;
+  if (ordersEnabled) {
+    try {
+      sessionStorage.setItem("offcode-bag", JSON.stringify(cart));
+    } catch {}
+  }
 }
 let toastTimer;
 $("#add").onclick = () => {
   const item = cart.find((p) => p.size === size);
   const qty = readQty();
+  if (cart.reduce((sum, p) => sum + p.qty, 0) + qty > 99) {
+    $("#toast").textContent = "Máximo 99 prendas por solicitud.";
+    $("#toast").classList.add("visible");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(
+      () => $("#toast").classList.remove("visible"),
+      3000,
+    );
+    return;
+  }
   if (item) item.qty += qty;
   else cart.push({ size, qty });
   $("#checkout-message").textContent = "";
@@ -85,8 +101,19 @@ document.querySelectorAll("dialog").forEach((d) => {
   });
 });
 $("#checkout").onclick = () => {
+  if (ordersEnabled && cart.length) {
+    try {
+      sessionStorage.setItem("offcode-bag", JSON.stringify(cart));
+      sessionStorage.removeItem("offcode-request-key");
+      location.href = "checkout.html";
+    } catch {
+      $("#checkout-message").textContent =
+        "Permite el almacenamiento de sesión del navegador para continuar con tu selección.";
+    }
+    return;
+  }
   $("#checkout-message").textContent =
-    "Prueba completada. No se creó ningún pedido ni se realizó ningún cobro. Para vender será necesario confirmar precios, inventario y conectar una pasarela de pagos.";
+    "Prueba completada. No se creó ningún pedido ni se realizó ningún cobro. Para vender falta habilitar los pedidos por transferencia y configurar la cuenta de Envia.";
 };
 renderCart();
 
@@ -195,3 +222,65 @@ new IntersectionObserver(
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) video.pause();
 });
+
+// Static previews keep their demo behavior. Only the configured server enables requests.
+fetch("/api/config")
+  .then(async (response) => {
+    if (!response.ok) return;
+    const config = await response.json();
+    for (const [id, value] of [
+      ["footer-privacy", config.privacyUrl],
+      ["footer-terms", config.termsUrl],
+      [
+        "footer-contact",
+        config.whatsapp ? "https://wa.me/" + config.whatsapp : "",
+      ],
+    ]) {
+      if (!value) continue;
+      try {
+        const url = new URL(value);
+        if (url.protocol !== "https:" || url.username || url.password) continue;
+        const link = $("#" + id);
+        link.href = url.href;
+        link.hidden = false;
+        $(".footer-links").hidden = false;
+      } catch {}
+    }
+    if (!config.enabled) return;
+    ordersEnabled = true;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem("offcode-bag") || "[]");
+      const sizes = new Set(saved.map((p) => p.size));
+      if (
+        !cart.length &&
+        Array.isArray(saved) &&
+        saved.length <= 4 &&
+        sizes.size === saved.length &&
+        saved.every(
+          (p) =>
+            ["S", "M", "L", "XL"].includes(p.size) &&
+            Number.isInteger(p.qty) &&
+            p.qty >= 1 &&
+            p.qty <= 99,
+        ) &&
+        saved.reduce((sum, p) => sum + p.qty, 0) <= 99
+      )
+        cart = saved.map((p) => ({ size: p.size, qty: p.qty }));
+    } catch {}
+    renderCart();
+    $("#site-notice").textContent = "OFFCODE · PEDIDOS POR TRANSFERENCIA";
+    $("#checkout").textContent = "Solicitar pedido →";
+    $("#cart-mode").textContent =
+      "Confirmaremos disponibilidad y envío antes de solicitar la transferencia.";
+    $("#subtotal-note").textContent =
+      "Envío por confirmar. No transfieras hasta recibir el total final.";
+    $("#product-status").textContent =
+      "Disponibilidad y envío sujetos a confirmación. Pago por transferencia.";
+    $("#selection-note").textContent = "— confirma disponibilidad al solicitar";
+    $("#product-description").textContent =
+      "Sudadera negra de la colaboración LA AFRO × OFFCODE. Explora las vistas y elige talla y cantidad para solicitar tu pedido.";
+    $("#conditions-text").textContent =
+      "Confirmaremos existencia, costo de envío y total antes de recibir la transferencia. Consulta las condiciones de compra al enviar tu solicitud.";
+    $("#footer-mode").textContent = "OFFCODE · Pedidos por transferencia";
+  })
+  .catch(() => {});

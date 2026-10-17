@@ -1,0 +1,35 @@
+{
+  "executedAt": "2026-10-16T23:07:45.414Z",
+  "scope": "LOCAL loopback, disco temporal, sin CDN; no representa hardware de Render, latencia real, API Envia ni usuarios simultáneos en producción.",
+  "node": "v24.14.0",
+  "stages": [
+    {
+      "name": "Catálogo y recursos, sin CDN local",
+      "requests": 600,
+      "concurrency": 50,
+      "errors": 0,
+      "elapsedMs": 2228,
+      "p95Ms": 446,
+      "bytes": 7362935
+    },
+    {
+      "name": "Solicitudes guardadas en SQLite temporal",
+      "requests": 120,
+      "concurrency": 20,
+      "errors": 0,
+      "elapsedMs": 349,
+      "p95Ms": 73,
+      "bytes": 8160
+    },
+    {
+      "name": "Reintentos de las mismas solicitudes",
+      "requests": 120,
+      "concurrency": 20,
+      "errors": 0,
+      "elapsedMs": 202,
+      "p95Ms": 40,
+      "bytes": 8160
+    }
+  ],
+  "uniqueSavedOrders": 120
+}

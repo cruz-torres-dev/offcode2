@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta
       name="description"
-      content="OFFCODE — propuesta de tienda y colección LA AFRO × OFFCODE."
+      content="Descubre LA AFRO × OFFCODE. Galería de la colección, tallas y pedidos por transferencia bancaria con envío FedEx."
     />
     <title>LA AFRO × OFFCODE — OFFCODE™</title>
     <link rel="icon" type="image/png" href="assets/monogram-static.png" />
@@ -13,7 +13,9 @@
   </head>
   <body>
     <a class="skip-link" href="#collection">Saltar a la colección</a>
-    <div class="notice">TIENDA DE DEMOSTRACIÓN · SIN COBROS</div>
+    <div class="notice" id="site-notice">
+      TIENDA DE DEMOSTRACIÓN · SIN COBROS
+    </div>
     <header id="top">
       <button id="menu-toggle" aria-expanded="false" aria-controls="main-nav">
         Menú <span>＋</span>
@@ -187,13 +189,15 @@
             <p class="demo-note">
               Precio de referencia del catálogo proporcionado.
             </p>
-            <p class="description">
+            <p class="description" id="product-description">
               Sudadera negra de la colaboración LA AFRO × OFFCODE. Descubre los
               gráficos del frente, la espalda y los detalles de la capucha.
               Selecciona talla y cantidad para probar la bolsa.
             </p>
             <fieldset>
-              <legend>Talla <span>— selección de prueba</span></legend>
+              <legend>
+                Talla <span id="selection-note">— selección de prueba</span>
+              </legend>
               <div class="sizes">
                 <button data-size="S" aria-pressed="false">S</button
                 ><button data-size="M" aria-pressed="true" class="selected">
@@ -221,7 +225,7 @@
             <button class="button dark" id="add">
               Agregar a la bolsa <span>+</span>
             </button>
-            <p class="demo-note">
+            <p class="demo-note" id="product-status">
               Demostración: disponibilidad por confirmar. No se realizan cobros.
             </p>
             <details>
@@ -233,7 +237,7 @@
             </details>
             <details>
               <summary>Envíos y cambios <span>+</span></summary>
-              <p>
+              <p id="conditions-text">
                 Esta es una tienda de prueba. No se procesan pagos ni envíos.
                 Las condiciones comerciales aún están por definir.
               </p>
@@ -309,7 +313,12 @@
     </main>
     <footer>
       <a class="wordmark" href="#">OFFCODE<sup>™</sup></a>
-      <p>Concepto web de demostración · OFFCODE</p>
+      <p id="footer-mode">Concepto web de demostración · OFFCODE</p>
+      <nav class="footer-links" aria-label="Información de compra" hidden>
+        <a id="footer-privacy" hidden>Privacidad</a
+        ><a id="footer-terms" hidden>Condiciones de compra</a
+        ><a id="footer-contact" hidden>Contacto ↗</a>
+      </nav>
       <a href="#">Volver arriba ↑</a>
     </footer>
     <dialog id="cart">
@@ -317,10 +326,12 @@
         <h2>Tu bolsa</h2>
         <button class="close" aria-label="Cerrar bolsa">✕</button>
       </div>
-      <p class="demo-note">Modo demostración · No se realizarán cobros.</p>
+      <p class="demo-note" id="cart-mode">
+        Modo demostración · No se realizarán cobros.
+      </p>
       <div id="cart-items"></div>
       <p id="cart-total" class="cart-total"></p>
-      <p class="demo-note">
+      <p class="demo-note" id="subtotal-note">
         Subtotal ilustrativo. Envíos e impuestos adicionales, si aplican, no
         calculados.
       </p>
@@ -339,7 +350,7 @@
       />
     </dialog>
     <div id="toast" role="status" aria-live="polite"></div>
-    <script src="app.js"></script>
+    <script src="app.js?v=store-2"></script>
     <script type="module" src="logo.js"></script>
   </body>
 </html>

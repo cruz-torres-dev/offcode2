@@ -1,0 +1,52 @@
+# Optional alternative to the existing static site. This is NOT deployed automatically.
+# A paid web service and persistent disk are needed for durable SQLite orders.
+services:
+  - type: web
+    name: offcode-orders
+    runtime: node
+    # Selected entry plan; not provisioned by this edit. Measure before the drop.
+    plan: 0.5c-512mb
+    numInstances: 1
+    buildCommand: echo No build required
+    startCommand: npm start
+    healthCheckPath: /api/config
+    disk:
+      name: orders
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.0
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATABASE_PATH
+        value: /var/data/offcode.sqlite
+      - key: HOME_PAGE
+        value: store
+      - key: TRUST_RENDER_PROXY
+        value: "true"
+      - key: ORDERS_ENABLED
+        value: "false"
+      - key: WAITLIST_ENABLED
+        value: "false"
+      - key: ENVIA_ENABLED
+        value: "false"
+      - key: ENVIA_ENVIRONMENT
+        value: sandbox
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SETTINGS_ENCRYPTION_KEY
+        sync: false
+# Initial deploy uses Render's automatic HTTPS URL. Set PUBLIC_ORIGIN to the
+# exact canonical HTTPS domain after connecting and verifying the custom domain.
+# Recommended: set the initial owner password and encryption key privately,
+# then let the owner enter contact/bank/Envia data in /settings.html.
+# Saved panel settings take precedence over these initial environment values.
+# For environment-only sales, add SALES_WHATSAPP, BANK_NAME, BANK_BENEFICIARY, BANK_CLABE
+# and TERMS_URL in the Render environment before enabling ORDERS_ENABLED.
+# For FedEx via Envia, also add private ENVIA_TOKEN, ENVIA_ORIGIN_JSON,
+# ENVIA_PACKAGES_JSON and optionally ENVIA_PRINT_SIZE. Never commit these values.
+# Test sandbox first, then set ENVIA_ENVIRONMENT=production with its matching token.
+# Enable ENVIA_ENABLED only after completing and verifying these settings.

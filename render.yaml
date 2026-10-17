@@ -4,3 +4,7 @@ services:
     runtime: static
     buildCommand: echo Static site ready
     staticPublishPath: ./dist
+    headers:
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=3600, s-maxage=86400

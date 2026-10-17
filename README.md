@@ -1,29 +1,33 @@
 # OFFCODE — LA AFRO × OFFCODE
 
-Tienda estática de demostración para el repositorio **cruz-torres-dev/offcode2**. No procesa cobros, pedidos, inventario ni envíos. La bolsa vive en memoria y se vacía al recargar. Precio de referencia: **$1,650 MXN**, precio anterior **$2,099 MXN**; tallas S, M, L y XL como selección de prueba.
+Tienda normal para **cruz-torres-dev/offcode2**. La raíz `/` e `index.html` muestran directamente campaña, monograma Of 3D original, galería, producto, tallas, cantidades y bolsa. Precio de referencia: **$1,650 MXN**, anterior **$2,099 MXN**; tallas S/M/L/XL.
+
+La landing VIP se retiró del sitio publicado. Sus fuentes están en `archive/vip/`, fuera de `dist/`. No se eliminaron registros existentes de la base. `/tienda.html` y `/teaser.html` redirigen a la tienda y conservan parámetros y anclas. La compra no exige registro VIP ni contraseña; `/admin.html` sigue protegido.
+
+**Las ventas siguen desactivadas hasta configurar los datos reales del propietario.** La tienda estática permite probar galería y bolsa; los pedidos persistentes y la integración Envia requieren el servidor Node. Pagos exclusivamente por transferencia, verificados manualmente. FedEx es la única paquetería.
 
 ## Probar localmente
 
-Desde esta carpeta en PowerShell:
+- Presentación: `python -m http.server 8000 --directory dist`; abrir http://localhost:8000.
+- Servidor: copiar `.env.example` a `.env`, configurar la contraseña privada y ejecutar `npm start`. Node.js **24.14.x**, sin instalar paquetes ni compilar. SQLite viene incluido y emite un aviso experimental.
+- Flujo ficticio completo: `npm run preview:shipping`; abrir http://127.0.0.1:8013. Contraseña del panel de esta vista: **solo-pruebas-fedex-ficticias**. Datos en memoria, sin llamadas a Envia ni guías reales. Detener con Ctrl+C.
+- Pruebas: `npm test`.
+- Ejercicio de carga exclusivamente local: `npm run check:load`; reporte en `qa/load-local.json`.
 
-```powershell
-python -m http.server 8000 --directory dist
-```
+Sigue [OPERACION.md](OPERACION.md) antes de habilitar ventas. El propietario puede configurar ENVIA_TOKEN directamente en las variables privadas del hosting; no necesita compartirlo por chat ni subirlo al repositorio.
 
-Visita http://localhost:8000. Detén el servidor con Ctrl+C. Usa HTTP local: abrir directamente `index.html` con `file://` puede impedir la carga del módulo 3D. La silueta estática seguirá disponible.
+## Archivos principales
 
-No se necesita npm, instalación de dependencias ni compilación para servir o publicar el sitio. Requiere un navegador moderno con soporte para módulos y dialog; el 3D usa WebGL.
-
-## Archivos
-
-- `dist/index.html`: portada, galería, producto, video, navegación y diálogos accesibles.
-- `dist/styles.css`: composición editorial, paleta neutra, diseño adaptable y alternativa de movimiento reducido.
-- `dist/app.js`: galería, ampliación, menú móvil, tallas, cantidad de 1 a 99, bolsa y controles de video.
-- `dist/logo.js`: carga del modelo original, acabado metálico suavizado, pausa/reanudación, manejo de errores y prefers-reduced-motion.
-- `dist/assets/`: recursos locales; no depende de enlaces temporales de Instagram.
-- `dist/assets/vendor/model-viewer.min.js`: biblioteca oficial `@google/model-viewer` **4.1.0**, incluida localmente, con licencia Apache 2.0 en `model-viewer.LICENSE`.
-- `render.yaml`: configuración estática existente, conservada.
-- `qa/`: capturas de revisión, fuera del directorio publicado.
+- `dist/index.html`, `styles.css`, `app.js`, `logo.js`: tienda, campaña, galería, bolsa y monograma.
+- `dist/checkout.html` / `checkout.js`: dirección, consentimiento, cotización FedEx y solicitud.
+- `dist/admin.html` / `admin.js`: pedidos, transferencias, compra y conciliación de guías.
+- `server/server.mjs`: API, sesiones y persistencia SQLite.
+- `server/envia.mjs`: estados, cotizaciones y guías FedEx mediante Envia.
+- `server/http-policy.mjs`: caché pública y reconocimiento del cliente detrás de Render.
+- `tests/`: integración, acceso, importes, estados, idempotencia, caché y prueba local de carga.
+- `.env.example`, `render.yaml`, `render-orders.yaml`: configuración local, estática y alternativa Node.
+- `archive/vip/`: respaldo de la landing anterior; no se publica.
+- `qa/`: capturas e informes de pruebas, fuera del sitio publicado.
 
 ## Monograma original
 
@@ -54,50 +58,42 @@ El clip se inspeccionó mediante fotogramas distribuidos por su duración y repr
 
 La portada incluye variantes WebP de 640 y 1170 px con selección por ancho de pantalla y respaldo JPEG. La segunda fotografía no se descarga en móvil. Las fotos visibles de la portada cargan de inmediato; las imágenes de producto y editoriales usan carga diferida. Las capturas antiguas permanecen en assets para conservar los recursos previos, pero la página ya no las referencia.
 
-## Verificación realizada
+## Render para la campaña
 
-Chrome de escritorio y vistas adaptables de **390 × 844** y **320 × 740**:
+El plan de entrada elegido es el Web Service **0.5c-512mb (0.5 CPU / 512 MB RAM)** y un disco persistente de 1 GB. Está propuesto en `render-orders.yaml`; **no se ha contratado ni desplegado**. Referencia consultada el 16 de octubre de 2026: $7 USD/mes de cómputo y $0.25 USD/mes por 1 GB de disco ($7.25 de base), más impuestos y tráfico adicional si aplica. El dominio ya pertenece al propietario. El plan `1c-2g` de $25 es una alternativa si las mediciones indican que hace falta más capacidad. Revisa [precios de Render](https://render.com/pricing) antes de contratar. El workspace puede permanecer en Hobby sin cuota; su plan es distinto del tamaño del servidor.
 
-- Portada y logo original visibles, giro con volumen y botón de pausa/reanudación.
-- Menú móvil abre, navega y cierra; enlace de marca vuelve al inicio.
-- Miniaturas, flechas y ampliación frente/espalda/detalle.
-- Selección de talla y límites de cantidad 1–99.
-- Dos prendas L → $3,300 MXN; dos S más una XL → $4,950 MXN.
-- Quitar productos → subtotal correcto; bolsa vacía → $0 y botón desactivado.
-- Prueba de pedido muestra aviso de que no se creó un pedido ni se realizó un cobro.
-- Reproducción y pausa del video, dimensiones nativas correctas y modo silencioso.
-- Sin desbordamiento horizontal en los anchos revisados; recursos locales sin rutas faltantes.
-- `node --check dist/app.js`, `node --check dist/logo.js` y `git diff --check`.
+Para el primer despliegue deja PUBLIC_ORIGIN sin definir: en Render el servidor usa su RENDER_EXTERNAL_URL HTTPS automática. Al verificar y conectar el dominio propio, define PUBLIC_ORIGIN con ese origen exacto, sin barra final, y utiliza esa dirección para tienda y panel. No importes la URL localhost de `.env.example` en producción.
 
-La preferencia de movimiento reducido y el manejo de fallos están implementados y revisados en código; no se cambió la configuración del sistema ni se simuló la pérdida de WebGL. No se probó en dispositivos físicos, Safari ni Firefox. No se realizó despliegue.
+Activa **Settings → Edge Caching → All files** en el servicio de pago para que también el modelo GLB y el HTML público puedan servirse desde la CDN. El servidor identifica qué respuestas son públicas: catálogo y recursos sí; API, checkout, administración y errores siempre `no-store`. No configures reglas que fuercen caché de `/api/*`. Valida `CF-Cache-Status` después del despliegue. Esta opción del dashboard no se activa solo por editar el YAML. [Documentación de caché](https://render.com/docs/web-service-caching).
+
+Las imágenes y el MP4 originales permanecen locales, con caché y revalidación ETag. El video solo carga al reproducirlo. Con movimiento reducido no se descarga el visor/modelo 3D. La CDN reduce carga en el servidor, pero el tráfico servido al visitante cuenta en la facturación: [bandwidth de Render](https://render.com/docs/outbound-bandwidth).
+
+Un Static Site sigue siendo viable para presentar la colección mediante CDN; **por sí solo no ejecuta pedidos ni Envia**. El Web Service gratuito duerme tras inactividad y no admite el disco persistente necesario para esta base local. No lo recomiendo para recibir pedidos durante el concierto. [Limitaciones del servicio gratuito](https://render.com/docs/free).
+
+Esta versión utiliza SQLite y una instancia. Un servicio con disco no puede escalar a varias instancias en Render; para ello habría que migrar a una base compartida, sesiones compartidas y coordinación de guías. [Escalado de Render](https://render.com/docs/scaling). No hay una cifra garantizada de visitantes: hace falta probar la instancia real, observar CPU/RAM/latencias y revisar los límites de Envia antes del anuncio. No cambies el tamaño ni despliegues durante el pico: los cambios con disco tienen una interrupción breve.
+
+## Verificación actual
+
+**21 pruebas automáticas aprobadas.** Incluyen pedidos, VIP archivado/API de datos conservada, FedEx exclusivo, bloqueo de compra duplicada, recuperación tras reinicio, raíz de tienda, caché pública, configuración cifrada, token oculto, cambio de contraseña, invalidación de tarifas, búsqueda de pedidos en todas las páginas y URL inicial automática de Render. No se realizaron pagos ni compras de guías reales.
+
+Prueba de carga local del 16 de octubre de 2026: 600 peticiones al catálogo y recursos con concurrencia 50, 120 solicitudes de pedido con concurrencia 20 y 120 reintentos. Cero respuestas de error y exactamente 120 pedidos únicos guardados. El reporte identifica tiempos y alcance. **Son solicitudes HTTP en loopback, no visitantes ni capacidad certificada de Render.** No incluye tiempos ni límites reales de Envia, CDN, conexión móvil o carga de renderizado 3D en teléfonos.
+
+La revisión visual usa el navegador integrado en escritorio de 1440 px y móviles de 390 y 320 px, sin desplazamiento horizontal. Se comprobaron la raíz sin VIP, menú móvil, galería y ampliación de espalda, dos prendas L con subtotal $3,300 MXN, navegación a checkout y regreso a la tienda, video vertical 720 × 960 silenciado y giro del monograma. Capturas: `qa/tienda-normal-desktop.jpg` y `qa/tienda-normal-mobile.jpg`. No se verificó en teléfono físico, Safari o Firefox.
+
+Para abrir ventas faltan los datos bancarios y de contacto, políticas reales, token de Envia, origen y perfiles medidos del paquete. La disponibilidad de tallas y la transferencia siguen siendo verificaciones del propietario; no hay inventario automático. No se añadió publicidad sobre un artista ni sobre un concierto que no fuera contenido entregado para publicar.
+
+El propietario puede completar esos datos desde `/settings.html`, con su sesión privada y confirmación de contraseña. El token se guarda cifrado en el servidor y no se devuelve al leer los ajustes. Antes configura ADMIN_PASSWORD y SETTINGS_ENCRYPTION_KEY en las variables privadas; respalda la clave original. El panel permite cambiar su contraseña, comprobar el catálogo de Envia y habilitar pedidos cuando los datos están completos. El detalle de configuración, recuperación, límites y pruebas reales pendientes está en `OPERACION.md`. Las políticas publicadas y los datos del propietario no se generan ni se inventan.
+
+Cambios principales de esta etapa: `dist/settings.html`, `dist/settings.js`, navegación/resumen de `dist/admin.*`, estilos móviles en `dist/operations.css`, enlaces configurables del pie en `dist/index.html` y `dist/app.js`, cifrado en `server/owner-settings.mjs`, APIs en `server/server.mjs`, comprobación de cuenta en `server/envia.mjs`, `tests/settings.test.mjs`, `.env.example` y `render-orders.yaml`.
 
 ## Subir a offcode2 cuando lo decidas
 
-El remoto existente es `https://github.com/cruz-torres-dev/offcode2.git`. Esta entrega no ejecuta commit, push ni despliegue.
-
-Revisa primero:
+Esta entrega no ejecuta commit, push ni despliegue. Revisa `git status`, `git diff --stat` y `git remote -v` antes de subir. El remoto existente es `https://github.com/cruz-torres-dev/offcode2.git`.
 
 ```powershell
-git status
-git diff --stat
-git remote -v
-```
-
-Para guardar y subir después de tu revisión:
-
-```powershell
-git add dist README.md qa
-git commit -m "Mejora tienda OFFCODE con monograma 3D original y campaña local"
+git add dist server tests archive package.json .gitignore .env.example render.yaml render-orders.yaml README.md OPERACION.md qa
+git commit -m "Restaura tienda OFFCODE e integra pedidos y FedEx con Envia"
 git push origin HEAD
 ```
 
-**Si Render ya tiene despliegue automático conectado a la rama actual, ese push puede publicar el sitio.** Revisa esa configuración antes de ejecutarlo.
-
-Render conserva estos valores: tipo Static Site, Build Command `echo Static site ready`, Publish Directory `dist`. No agregues comandos npm. También puede usarse el `render.yaml` existente como Blueprint. Para revisar sin desplegar, mantén los cambios localmente o súbelos a una rama sin despliegue automático.
-
-## Última pasada de acabado
-
-- Encuadre superior de las dos fotografías de portada para conservar completas las cabezas en escritorio; se mantiene el encuadre específico de móvil.
-- Video de campaña a todo el ancho útil en móvil, después de las dos fotos editoriales, con botón de al menos 44 px de alto.
-- Portada WebP: frente 640 px ≈ 57 KB / 1170 px ≈ 152 KB; espalda ≈ 46 KB / 97 KB. Los JPEG originales se conservan como alternativa.
-- Revisión adicional en Chrome de escritorio y vistas móviles; reproducción y pausa verificadas de nuevo. No se midió rendimiento en una red móvil real ni se revisó en un teléfono físico.
+Si Render tiene despliegue automático sobre esa rama, el push puede publicar la versión. Revisa primero su configuración. No subas `.env`, tokens, datos bancarios completados, bases SQLite, exportaciones o datos de clientes.

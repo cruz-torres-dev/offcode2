@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Pedidos — OFFCODE</title>
+    <link rel="icon" href="assets/monogram-static.png" />
+    <link rel="stylesheet" href="operations.css" />
+  </head>
+  <body>
+    <header>
+      <a class="wordmark" href="index.html">OFFCODE™</a
+      ><a href="index.html">Ver tienda ↗</a
+      ><button id="logout" hidden>Cerrar sesión</button>
+    </header>
+    <main class="admin-layout">
+      <section id="login">
+        <p class="eyebrow">ACCESO PRIVADO</p>
+        <h1>Detrás del código.</h1>
+        <p class="intro">Pedidos, transferencias y seguimiento de envíos.</p>
+        <form id="login-form">
+          <label
+            >Contraseña de administración<input
+              id="password"
+              type="password"
+              autocomplete="current-password"
+              required
+              minlength="16"
+              maxlength="256" /></label
+          ><button class="primary">Entrar al panel →</button>
+        </form>
+        <p class="fine">
+          Solo el propietario debe tener acceso. Los pedidos se consultan en el
+          servidor.
+        </p>
+      </section>
+      <p id="admin-message" role="status" class="message"></p>
+      <section id="dashboard" hidden>
+        <nav class="owner-nav" aria-label="Panel del propietario">
+          <a href="admin.html" aria-current="page">Pedidos y envíos</a
+          ><a href="settings.html">Configuración</a
+          ><a href="settings.html#account">Mi acceso</a
+          ><a href="index.html">Ver tienda ↗</a>
+        </nav>
+        <div class="dashboard-head">
+          <div>
+            <p class="eyebrow">OPERACIÓN / OFFCODE</p>
+            <h1>Pedidos y envíos.</h1>
+          </div>
+          <button id="refresh">Actualizar ↻</button>
+        </div>
+        <p class="intro">
+          Verifica cada transferencia en tu banco. Compra la guía desde este
+          panel después de confirmar el pago; registra el envío al entregar el
+          paquete a FedEx.
+        </p>
+        <p id="shipping-status" class="message" role="status"></p>
+        <div
+          id="overview"
+          class="overview"
+          aria-label="Resumen de todos los pedidos"
+        ></div>
+        <div class="filters">
+          <label
+            >Buscar en todos los pedidos<input
+              id="search"
+              type="search"
+              placeholder="Referencia o nombre" /></label
+          ><label
+            >Estado<select id="status-filter">
+              <option value="">Todos</option>
+              <option value="requested">Por confirmar</option>
+              <option value="awaiting_transfer">
+                Pendiente de transferencia
+              </option>
+              <option value="paid">Pago verificado</option>
+              <option value="shipped">Enviado</option>
+              <option value="delivered">Entregado</option>
+              <option value="cancelled">Cancelado</option>
+            </select></label
+          >
+        </div>
+        <p id="page-summary" class="fine"></p>
+        <div id="orders"></div>
+        <div class="pagination">
+          <button id="previous">← Anteriores</button
+          ><span id="page-number"></span><button id="next">Siguientes →</button>
+        </div>
+      </section>
+    </main>
+    <footer>
+      OFFCODE™ · Panel privado · Guías por acción del propietario.
+      Transferencias verificadas manualmente.
+    </footer>
+    <script src="admin.js" defer></script>
+  </body>
+</html>

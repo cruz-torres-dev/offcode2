@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Solicitar pedido — OFFCODE</title>
+    <link rel="icon" href="assets/monogram-static.png" />
+    <link rel="stylesheet" href="operations.css" />
+  </head>
+  <body>
+    <header>
+      <a class="wordmark" href="index.html">OFFCODE™</a
+      ><a href="index.html#collection">← Volver a la colección</a>
+    </header>
+    <main class="checkout-layout">
+      <section>
+        <p class="eyebrow">LA AFRO × OFFCODE / PEDIDOS</p>
+        <h1>Tu próximo código.</h1>
+        <p class="intro">
+          Solicita disponibilidad y envío. Confirmaremos el total antes de que
+          hagas la transferencia.
+        </p>
+        <p id="availability" class="message" role="status">
+          Comprobando recepción de pedidos…
+        </p>
+        <form id="order-form" hidden>
+          <fieldset>
+            <legend>Contacto</legend>
+            <div class="form-grid">
+              <label
+                >Nombre completo<input
+                  name="name"
+                  autocomplete="name"
+                  required
+                  minlength="3"
+                  maxlength="100" /></label
+              ><label
+                >Teléfono con código de país<input
+                  name="phone"
+                  type="tel"
+                  autocomplete="tel"
+                  inputmode="tel"
+                  placeholder="52…"
+                  required
+                  pattern="[0-9]{10,15}"
+                  title="Entre 10 y 15 dígitos, sin espacios" /></label
+              ><label class="full"
+                >Correo electrónico<input
+                  name="email"
+                  type="email"
+                  autocomplete="email"
+                  maxlength="150"
+                  required
+              /></label>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Dirección de entrega en México</legend>
+            <div class="form-grid">
+              <label class="full"
+                >Calle y número (incluye interior, si aplica)<input
+                  name="street"
+                  autocomplete="address-line1"
+                  maxlength="150"
+                  minlength="5"
+                  required /></label
+              ><label
+                >Colonia<input
+                  name="neighborhood"
+                  autocomplete="address-line2"
+                  maxlength="100"
+                  required /></label
+              ><label
+                >Código postal<input
+                  name="postalCode"
+                  autocomplete="postal-code"
+                  inputmode="numeric"
+                  pattern="[0-9]{5}"
+                  maxlength="5"
+                  required /></label
+              ><label
+                >Ciudad / municipio<input
+                  name="city"
+                  autocomplete="address-level2"
+                  maxlength="100"
+                  required /></label
+              ><label
+                >Estado<input
+                  id="state-text"
+                  name="state"
+                  autocomplete="address-level1"
+                  maxlength="60"
+                  required /></label
+              ><label class="full"
+                >Referencias de entrega (opcional)<input
+                  name="notes"
+                  maxlength="300"
+              /></label>
+            </div>
+          </fieldset>
+          <label class="check"
+            ><input name="consent" type="checkbox" required /><span
+              >He leído el
+              <a id="privacy-link" target="_blank" rel="noopener"
+                >aviso de privacidad</a
+              >
+              y las
+              <a id="terms-link" target="_blank" rel="noopener"
+                >condiciones de compra</a
+              >, y acepto usar estos datos para gestionar mi solicitud.</span
+            ></label
+          >
+          <fieldset id="shipping-section" hidden>
+            <legend>Envío por FedEx</legend>
+            <p class="fine">
+              Al cotizar compartiremos los datos de entrega con Envia para
+              consultar servicios de FedEx. El tiempo mostrado es una estimación
+              de la paquetería.
+            </p>
+            <button type="button" id="quote-shipping">
+              Consultar envío FedEx
+            </button>
+            <p id="shipping-message" role="status"></p>
+            <div id="shipping-rates" class="shipping-rates"></div>
+          </fieldset>
+          <button class="primary" id="submit-order">Solicitar pedido →</button>
+          <p class="fine">
+            Confirmaremos disponibilidad antes de compartir los datos bancarios.
+            Enviar esta solicitud no confirma inventario ni realiza un cobro.
+          </p>
+        </form>
+        <section id="order-success" hidden tabindex="-1">
+          <h2>Solicitud recibida.</h2>
+          <p id="order-reference"></p>
+          <p>
+            Guarda esta referencia. Confirmaremos disponibilidad y costo de
+            envío antes de compartir el total y los datos para transferir. No
+            transfieras todavía.
+          </p>
+          <a id="whatsapp-order" class="primary" target="_blank" rel="noopener"
+            >Continuar por WhatsApp ↗</a
+          >
+          <p class="fine">
+            Este enlace abre un mensaje preparado. Tú decides cuándo enviarlo.
+            No se ha enviado ningún mensaje automáticamente.
+          </p>
+        </section>
+      </section>
+      <aside>
+        <p class="eyebrow">TU SELECCIÓN</p>
+        <h2>LA AFRO × OFFCODE</h2>
+        <img
+          class="product"
+          src="assets/product-front.jpg"
+          alt="Sudadera LA AFRO × OFFCODE"
+          width="1080"
+          height="1080"
+        />
+        <div id="order-items"></div>
+        <p class="total" id="order-subtotal"></p>
+        <p id="shipping-summary" class="fine">
+          Envío por confirmar. El total final se acuerda antes de transferir.
+        </p>
+        <a href="index.html#collection">Editar selección ↗</a>
+      </aside>
+    </main>
+    <footer>OFFCODE™ · Transferencias verificadas manualmente</footer>
+    <script src="checkout.js" defer></script>
+  </body>
+</html>

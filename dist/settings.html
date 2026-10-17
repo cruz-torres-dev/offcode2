@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Configuración privada — OFFCODE</title>
+    <link rel="icon" href="assets/monogram-static.png" />
+    <link rel="stylesheet" href="operations.css" />
+  </head>
+  <body>
+    <header>
+      <a class="wordmark" href="index.html">OFFCODE™</a
+      ><a href="admin.html">Pedidos y envíos</a
+      ><button id="logout" hidden>Cerrar sesión</button>
+    </header>
+    <main class="admin-layout">
+      <section id="login">
+        <p class="eyebrow">ACCESO DEL PROPIETARIO</p>
+        <h1>Tu marca. Tu control.</h1>
+        <p class="intro">
+          Entra para configurar tu tienda, transferencias y cuenta de Envia.
+        </p>
+        <form id="login-form">
+          <label
+            >Contraseña de administración<input
+              id="password"
+              type="password"
+              autocomplete="current-password"
+              required
+              minlength="16"
+              maxlength="256" /></label
+          ><button class="primary">Entrar al panel →</button>
+        </form>
+      </section>
+      <p
+        id="settings-message"
+        class="message"
+        role="status"
+        aria-live="polite"
+      ></p>
+      <section id="settings-panel" hidden>
+        <nav class="owner-nav" aria-label="Panel del propietario">
+          <a href="admin.html">Pedidos y envíos</a
+          ><a href="settings.html" aria-current="page">Configuración</a
+          ><a href="#account">Mi acceso</a><a href="index.html">Ver tienda ↗</a>
+        </nav>
+        <div class="dashboard-head">
+          <div>
+            <p class="eyebrow">CONFIGURACIÓN / OFFCODE</p>
+            <h1>Prepara el siguiente pedido.</h1>
+          </div>
+          <button id="reload-settings">Recargar</button>
+        </div>
+        <p class="intro">
+          Tus datos se guardan de forma privada en el servidor. La recepción de
+          pedidos se activa al final, después de revisar la configuración y
+          probar tu cuenta.
+        </p>
+        <section aria-labelledby="readiness-title" class="readiness">
+          <h2 id="readiness-title">Estado de preparación</h2>
+          <div id="readiness-checks"></div>
+          <p class="fine">
+            “Completo” indica que los campos requeridos están presentes. Valida
+            tu cuenta, tarifas y una guía con Envia antes del lanzamiento.
+          </p>
+        </section>
+        <form id="settings-form">
+          <fieldset>
+            <legend>01 / Contacto y transferencia</legend>
+            <div class="form-grid">
+              <label
+                >WhatsApp de ventas con código de país<input
+                  name="whatsapp"
+                  type="tel"
+                  inputmode="tel"
+                  maxlength="15"
+                  placeholder="52…"
+              /></label>
+              <label
+                >Banco receptor<input
+                  name="bankName"
+                  autocomplete="off"
+                  maxlength="100"
+              /></label>
+              <label
+                >Titular de la cuenta<input
+                  name="bankBeneficiary"
+                  autocomplete="off"
+                  maxlength="150"
+              /></label>
+              <label
+                >CLABE de 18 dígitos<input
+                  name="bankClabe"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  maxlength="18"
+                  pattern="[0-9]{18}"
+              /></label>
+            </div>
+            <p class="fine">
+              No se piden credenciales de banca. Tú verificas cada abono en tu
+              cuenta antes de marcar el pedido pagado. Los pedidos con total ya
+              confirmado conservan la cuenta que se les indicó.
+            </p>
+          </fieldset>
+          <fieldset>
+            <legend>02 / Información de compra</legend>
+            <div class="form-grid">
+              <label
+                >Aviso de privacidad publicado (HTTPS)<input
+                  name="privacyUrl"
+                  type="url"
+                  maxlength="2048"
+                  placeholder="https://…"
+              /></label>
+              <label
+                >Condiciones de compra publicadas (HTTPS)<input
+                  name="termsUrl"
+                  type="url"
+                  maxlength="2048"
+                  placeholder="https://…"
+              /></label>
+            </div>
+            <p class="fine">
+              Publica información real sobre uso de datos para pedidos y
+              Envia/FedEx, envíos, cambios y devoluciones. Estos campos enlazan
+              a tus páginas; no generan políticas automáticamente.
+            </p>
+          </fieldset>
+          <fieldset>
+            <legend>03 / Cuenta de Envia · Solo FedEx</legend>
+            <div class="form-grid">
+              <label
+                >Entorno<select name="enviaEnvironment">
+                  <option value="sandbox">Pruebas / sandbox</option>
+                  <option value="production">Producción / guías reales</option>
+                </select></label
+              >
+              <label
+                >Tamaño del PDF<select name="printSize">
+                  <option value="PAPER_4X6">Papel 4 × 6</option>
+                  <option value="STOCK_4X6">Etiqueta 4 × 6</option>
+                  <option value="PAPER_7X4.75">Papel 7 × 4.75</option>
+                  <option value="PAPER_LETTER">Carta</option>
+                </select></label
+              >
+              <label class="full"
+                >Nuevo token privado de Envia<input
+                  name="enviaToken"
+                  type="password"
+                  autocomplete="new-password"
+                  maxlength="4096"
+                  aria-describedby="token-status" /><span
+                  id="token-status"
+                  class="fine"
+                ></span
+              ></label>
+            </div>
+            <label class="check"
+              ><input name="clearToken" type="checkbox" /><span
+                >Retirar el token guardado. Desactiva primero Envia si quieres
+                dejarlo sin token.</span
+              ></label
+            >
+            <button type="button" id="check-envia">
+              Consultar estados y comprobar acceso a Envia
+            </button>
+            <p id="envia-check-message" role="status" class="fine">
+              Guarda el token antes de comprobarlo. Esta consulta no compra
+              guías.
+            </p>
+          </fieldset>
+          <fieldset>
+            <legend>04 / Domicilio de origen en México</legend>
+            <div class="form-grid">
+              <label
+                >Nombre del remitente<input
+                  name="senderName"
+                  maxlength="150"
+                  autocomplete="name"
+              /></label>
+              <label
+                >Teléfono del remitente<input
+                  name="senderPhone"
+                  maxlength="15"
+                  type="tel"
+              /></label>
+              <label
+                >Correo del remitente<input
+                  name="senderEmail"
+                  type="email"
+                  maxlength="150"
+              /></label>
+              <label
+                >Empresa (opcional)<input name="senderCompany" maxlength="150"
+              /></label>
+              <label>Calle<input name="senderStreet" maxlength="150" /></label>
+              <label
+                >Número exterior e interior<input
+                  name="senderNumber"
+                  maxlength="150"
+              /></label>
+              <label
+                >Colonia<input name="senderDistrict" maxlength="150"
+              /></label>
+              <label
+                >Ciudad o municipio<input name="senderCity" maxlength="150"
+              /></label>
+              <label
+                >Estado de origen (catálogo de Envia)<select name="senderState">
+                  <option value="">
+                    Primero consulta el catálogo de Envia
+                  </option>
+                </select></label
+              >
+              <label
+                >Código postal<input
+                  name="senderPostalCode"
+                  inputmode="numeric"
+                  maxlength="5"
+                  pattern="[0-9]{5}"
+              /></label>
+              <label class="full"
+                >Referencias de origen (opcional)<input
+                  name="senderReference"
+                  maxlength="300"
+              /></label>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>05 / Peso y medidas del paquete</legend>
+            <p class="intro">
+              Añade un perfil por cantidad total de prendas. Mide y pesa el
+              paquete cerrado, listo para entregar. Cada perfil representa un
+              solo bulto.
+            </p>
+            <div id="package-profiles"></div>
+            <button type="button" id="add-package">
+              Añadir perfil de empaque +
+            </button>
+            <p class="fine">
+              Una cantidad sin perfil no tendrá cotización automática. No se
+              multiplican medidas ni se inventan pesos.
+            </p>
+          </fieldset>
+          <fieldset>
+            <legend>06 / Recepción de pedidos</legend>
+            <label class="check"
+              ><input name="enviaEnabled" type="checkbox" /><span
+                >Habilitar cotización y compra de guías FedEx mediante
+                Envia.</span
+              ></label
+            >
+            <label class="check"
+              ><input name="ordersEnabled" type="checkbox" /><span
+                >Recibir solicitudes de pedido por transferencia. Revisé los
+                datos y las condiciones de compra.</span
+              ></label
+            >
+            <p class="fine">
+              En pruebas, las tarifas y guías son simuladas. Para abrir ventas
+              en el servidor de producción selecciona producción y configura su
+              token. El inventario y las transferencias se confirman
+              manualmente.
+            </p>
+          </fieldset>
+          <section class="save-settings">
+            <label
+              >Confirma tu contraseña actual para guardar<input
+                name="currentPassword"
+                type="password"
+                autocomplete="current-password"
+                minlength="16"
+                maxlength="256"
+                required /></label
+            ><button id="save-settings" class="primary">
+              Guardar configuración privada
+            </button>
+            <p id="saved-at" class="fine"></p>
+          </section>
+        </form>
+        <section id="account">
+          <p class="eyebrow">MI ACCESO</p>
+          <h2>Cambiar contraseña del propietario</h2>
+          <p class="intro">
+            El cambio cierra todas las sesiones del panel. Usa una contraseña
+            exclusiva de al menos 16 caracteres.
+          </p>
+          <form id="password-form" class="action-form">
+            <label
+              >Contraseña actual<input
+                name="currentPassword"
+                type="password"
+                autocomplete="current-password"
+                minlength="16"
+                maxlength="256"
+                required /></label
+            ><label
+              >Nueva contraseña<input
+                name="newPassword"
+                type="password"
+                autocomplete="new-password"
+                minlength="16"
+                maxlength="256"
+                required /></label
+            ><label
+              >Repetir nueva contraseña<input
+                name="confirmPassword"
+                type="password"
+                autocomplete="new-password"
+                minlength="16"
+                maxlength="256"
+                required /></label
+            ><button class="primary">
+              Cambiar contraseña y cerrar sesiones
+            </button>
+          </form>
+        </section>
+      </section>
+    </main>
+    <footer>
+      OFFCODE™ · Configuración privada del propietario. Quien administre el
+      servidor también tiene acceso técnico a sus datos.
+    </footer>
+    <script src="settings.js" defer></script>
+  </body>
+</html>
