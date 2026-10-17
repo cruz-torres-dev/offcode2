@@ -1,0 +1,128 @@
+// SQLite schema; existing tables are preserved by idempotent migrations.
+export const SCHEMA_VERSION = 1;
+export const SCHEMA_NAME = "catalog_and_inventory";
+
+const SQLITE = [
+  `CREATE TABLE IF NOT EXISTS owner_auth (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    salt BLOB NOT NULL,
+    hash BLOB NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS owner_settings (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    version INTEGER NOT NULL,
+    nonce BLOB NOT NULL,
+    tag BLOB NOT NULL,
+    payload BLOB NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS orders (
+    id TEXT PRIMARY KEY,
+    request_key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    payload TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS vip_members (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    consent_at TEXT NOT NULL,
+    privacy_url TEXT NOT NULL,
+    consent_version TEXT NOT NULL,
+    consent_text TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    withdrawn_at TEXT
+  )`,
+  `CREATE TABLE IF NOT EXISTS shipping_quotes (
+    id TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    order_id TEXT,
+    expires INTEGER NOT NULL,
+    payload TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS shipping_quotes_expires ON shipping_quotes(expires)`,
+  `CREATE TABLE IF NOT EXISTS shipping_jobs (
+    order_id TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    payload TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS products (
+    id TEXT PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    color TEXT NOT NULL DEFAULT '',
+    composition TEXT NOT NULL DEFAULT '',
+    fabric_weight_gsm INTEGER,
+    fit TEXT NOT NULL DEFAULT '',
+    price_cents INTEGER NOT NULL CHECK(price_cents >= 0 AND price_cents <= 10000000),
+    status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published','archived')),
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS product_images (
+    id TEXT PRIMARY KEY,
+    product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    src TEXT NOT NULL,
+    alt TEXT NOT NULL DEFAULT '',
+    position INTEGER NOT NULL DEFAULT 0
+  )`,
+  `CREATE INDEX IF NOT EXISTS product_images_product ON product_images(product_id, position)`,
+  `CREATE TABLE IF NOT EXISTS variants (
+    id TEXT PRIMARY KEY,
+    product_id TEXT NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+    size TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '',
+    sku TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','archived')),
+    position INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(product_id, size, color)
+  )`,
+  `CREATE INDEX IF NOT EXISTS variants_product ON variants(product_id, position)`,
+  `CREATE TABLE IF NOT EXISTS inventory (
+    variant_id TEXT PRIMARY KEY REFERENCES variants(id) ON DELETE RESTRICT,
+    on_hand INTEGER NOT NULL DEFAULT 0 CHECK(on_hand >= 0),
+    reserved INTEGER NOT NULL DEFAULT 0 CHECK(reserved >= 0),
+    low_stock_threshold INTEGER NOT NULL DEFAULT 0 CHECK(low_stock_threshold >= 0),
+    configured INTEGER NOT NULL DEFAULT 0 CHECK(configured IN (0,1)),
+    updated_at TEXT NOT NULL,
+    CHECK(reserved <= on_hand OR configured = 0)
+  )`,
+  `CREATE TABLE IF NOT EXISTS inventory_movements (
+    id TEXT PRIMARY KEY,
+    variant_id TEXT NOT NULL REFERENCES variants(id) ON DELETE RESTRICT,
+    type TEXT NOT NULL CHECK(type IN ('entry','adjustment','correction','reserve','release','sale')),
+    qty INTEGER NOT NULL,
+    reserved_delta INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    order_id TEXT,
+    actor TEXT NOT NULL DEFAULT 'owner',
+    on_hand_after INTEGER NOT NULL,
+    reserved_after INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS inventory_movements_variant ON inventory_movements(variant_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS order_reservations (
+    order_id TEXT NOT NULL,
+    variant_id TEXT NOT NULL REFERENCES variants(id) ON DELETE RESTRICT,
+    qty INTEGER NOT NULL CHECK(qty > 0),
+    state TEXT NOT NULL DEFAULT 'reserved' CHECK(state IN ('reserved','sold','released')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(order_id, variant_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS order_reservations_variant ON order_reservations(variant_id, state)`,
+];
+
+export function schemaStatements() { return SQLITE; }
+
+export const TABLE_ORDER = Object.freeze([
+  "owner_auth", "owner_settings", "orders", "vip_members", "shipping_quotes",
+  "shipping_jobs", "products", "product_images", "variants", "inventory",
+  "inventory_movements", "order_reservations",
+]);
+
+export const movementOrder = () => "created_at DESC, rowid DESC";

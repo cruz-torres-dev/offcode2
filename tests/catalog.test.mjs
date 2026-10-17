@@ -4,9 +4,9 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { createApp } from "../server/server.mjs";
 import { migrate, SCHEMA_VERSION } from "../server/db.mjs";
+import { openDatabase } from "../server/database.mjs";
 
 const origin = "http://localhost:8000",
   password = "synthetic-catalog-admin-password";
@@ -114,22 +114,34 @@ test("Migraciones versionadas e idempotentes conservan productos y pedidos", asy
     await app.close();
     app = null;
 
-    const db = new DatabaseSync(databasePath);
-    const before = {
-      version: db.prepare("PRAGMA user_version").get().user_version,
-      products: db.prepare("SELECT COUNT(*) AS n FROM products").get().n,
-      variants: db.prepare("SELECT COUNT(*) AS n FROM variants").get().n,
-      orders: db.prepare("SELECT COUNT(*) AS n FROM orders").get().n,
-    };
-    assert.equal(before.version, SCHEMA_VERSION);
-    assert.equal(before.products, 2);
-    // Running the same migrations again must change nothing.
-    assert.equal(migrate(db), SCHEMA_VERSION);
-    assert.equal(migrate(db), SCHEMA_VERSION);
-    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM products").get().n, before.products);
-    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM variants").get().n, before.variants);
-    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM orders").get().n, before.orders);
-    db.close();
+    const db = await openDatabase({ driver: "sqlite", path: databasePath });
+    try {
+      const before = {
+        version: (await db.get("PRAGMA user_version")).user_version,
+        products: (await db.get("SELECT COUNT(*) AS n FROM products")).n,
+        variants: (await db.get("SELECT COUNT(*) AS n FROM variants")).n,
+        orders: (await db.get("SELECT COUNT(*) AS n FROM orders")).n,
+      };
+      assert.equal(before.version, SCHEMA_VERSION);
+      assert.equal(before.products, 2);
+      // Running the same migrations again must change nothing.
+      assert.equal(await migrate(db), SCHEMA_VERSION);
+      assert.equal(await migrate(db), SCHEMA_VERSION);
+      assert.equal(
+        (await db.get("SELECT COUNT(*) AS n FROM products")).n,
+        before.products,
+      );
+      assert.equal(
+        (await db.get("SELECT COUNT(*) AS n FROM variants")).n,
+        before.variants,
+      );
+      assert.equal(
+        (await db.get("SELECT COUNT(*) AS n FROM orders")).n,
+        before.orders,
+      );
+    } finally {
+      await db.close();
+    }
 
     app = await start({ databasePath });
     await login(app);
@@ -597,4 +609,22 @@ test("Solicitud duplicada y fallo de correo no reservan dos veces", async () => 
   } finally {
     await app.close();
   }
+});
+
+test("Reintentos concurrentes idénticos crean un solo pedido y una sola reserva", async () => {
+  const app = await start();
+  try {
+    await login(app);
+    await stock(app, "VAR-HOODIE-M", 1);
+    const input = request([{ variantId: "VAR-HOODIE-M", qty: 1 }]);
+    const responses = await Promise.all(Array.from({ length: 8 }, () => app.call("/api/orders", "POST", input)));
+    assert.equal(responses.filter((r) => r.status === 201).length, 1);
+    assert.ok(responses.every((r) => [200, 201].includes(r.status)), JSON.stringify(responses));
+    assert.equal(new Set(responses.map((r) => r.data.id)).size, 1);
+    const inventory = (await app.call("/api/admin/inventory")).data.variants.find((v) => v.id === "VAR-HOODIE-M");
+    assert.equal(inventory.reserved, 1);
+    assert.equal((await app.call("/api/admin/orders")).data.total, 1);
+    const movements = (await app.call("/api/admin/inventory/VAR-HOODIE-M/movements")).data.movements;
+    assert.equal(movements.filter((m) => m.type === "reserve").length, 1);
+  } finally { await app.close(); }
 });

@@ -15,6 +15,7 @@ try {
     origin,
     password,
     production: false,
+    email: { env: {}, autoStart: false, logger: () => {} },
     enabled: true,
     waitlistEnabled: false,
     trustRenderProxy: false,

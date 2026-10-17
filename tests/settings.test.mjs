@@ -7,6 +7,8 @@ import os from "node:os";
 import path from "node:path";
 import { createApp } from "../server/server.mjs";
 import { settingsStore } from "../server/owner-settings.mjs";
+import { migrate } from "../server/db.mjs";
+import { openDatabase } from "../server/database.mjs";
 const origin = "http://127.0.0.1:9876",
   password = "synthetic-owner-password",
   key = "ab".repeat(32);
@@ -269,15 +271,16 @@ test("La cuenta acordada se conserva al editar la tienda; cerrar ventas bloquea 
     await app.close();
   }
 });
-test("Cifrado autenticado: modificar el contenido impide abrir la configuración", () => {
-  const db = new DatabaseSync(":memory:");
+test("Cifrado autenticado: modificar el contenido impide abrir la configuración", async () => {
+  const db = await openDatabase({ driver: "sqlite", path: ":memory:" });
   try {
+    await migrate(db);
     const store = settingsStore(db, key);
-    store.save({ private: "synthetic" }, 0);
-    db.exec("UPDATE owner_settings SET payload=x'00'");
-    assert.throws(() => store.read(), /cifrada/);
+    await store.save({ private: "synthetic" }, 0);
+    await db.exec("UPDATE owner_settings SET payload=x'00'");
+    await assert.rejects(() => store.read(), /cifrada/);
   } finally {
-    db.close();
+    await db.close();
   }
 });
 test("La búsqueda y los filtros abarcan pedidos fuera de la primera página", async () => {

@@ -98,7 +98,7 @@ La prenda publicada hoy es la hoodie oversize negra (S, M, L, XL). XS y XXL exis
 
 ### Inventario por variante
 
-- `disponible = existencias físicas − unidades reservadas`, nunca negativo (`MAX(0, …)`).
+- `disponible = existencias físicas − unidades reservadas`, nunca negativo (`MAX(0, …)` en SQLite).
 - Cada variante tiene su **umbral de stock bajo**, configurable desde el panel. El resumen cuenta las variantes que están en o por debajo del umbral.
 - **El control de stock se activa por variante con la primera entrada.** Mientras una variante siga sin configurar, `disponible` es `null` y los pedidos se aceptan sin reservar nada, igual que antes de esta versión: no se inventan existencias.
 - Movimientos registrados, siempre con actor y fecha: `entry` (entrada), `adjustment` (ajuste, puede restar), `correction` (corrección administrativa), `reserve`, `sale` y `release`. Las entradas y ajustes manuales **exigen motivo** y no pueden dejar el inventario en negativo.
@@ -106,7 +106,7 @@ La prenda publicada hoy es la hoodie oversize negra (S, M, L, XL). XS y XXL exis
 
 ### Reserva, pago y deducción
 
-1. Al crear el pedido, el servidor valida variante, precio y stock, y **reserva** las unidades dentro de una transacción `BEGIN IMMEDIATE` de SQLite. Dos solicitudes simultáneas por la última unidad: una recibe 201 y la otra 409.
+1. Al crear el pedido, el servidor valida variante, precio y stock, y **reserva** las unidades dentro de una transacción: `BEGIN IMMEDIATE` en SQLite con un ejecutor propio; las peticiones ajenas esperan al commit o rollback. Dos solicitudes simultáneas por la última unidad: una recibe 201 y la otra 409.
 2. **Reservar no es cobrar ni descontar.** Las unidades reservadas siguen siendo físicas.
 3. Al marcar `paid`, la reserva se convierte en venta **una sola vez** y ahí se descuentan las unidades físicas.
 4. Al cancelar, se **libera** la reserva. Cancelar después de pagar no devuelve stock automáticamente: la devolución es un movimiento manual con motivo.
@@ -116,10 +116,11 @@ La prenda publicada hoy es la hoodie oversize negra (S, M, L, XL). XS y XXL exis
 
 ### Migraciones
 
-- Versionadas con `PRAGMA user_version` y `SCHEMA_VERSION` en `server/db.mjs`. Se aplican en una transacción: si una falla, no queda nada a medias.
+- Versionadas con `PRAGMA user_version` y `SCHEMA_VERSION = 1`. El esquema SQLite vive en `server/schema.mjs` y la migración en `server/db.mjs`.
 - Idempotentes: arrancar dos veces no duplica productos, variantes ni movimientos. La prueba correspondiente crea el esquema, lo vuelve a migrar y comprueba que los pedidos y productos existentes siguen intactos.
+- DDL, siembra y cambio de versión comparten una transacción SQLite. Una versión futura se rechaza sin alterar tablas. Solo se siembra al actualizar desde una versión menor si `products` está vacía y la siembra está habilitada; nunca se inventan existencias.
 - **La ruta de la base de datos no cambió** (`DATABASE_PATH` o `./data/offcode.sqlite`). Las claves son estables: `PRD-…`, `VAR-…`, `MOV-…` y los pedidos conservan `OF-…`.
-- Integridad referencial activada (`PRAGMA foreign_keys = ON`) y restricciones `CHECK` para cantidades y estados.
+- Integridad referencial activada (`PRAGMA foreign_keys=ON`) y restricciones `CHECK` para cantidades y estados.
 
 ### Pasos manuales para activar el sistema en producción
 
@@ -130,6 +131,24 @@ La prenda publicada hoy es la hoodie oversize negra (S, M, L, XL). XS y XXL exis
 5. En **Productos**, publica o despublica lo que corresponda y confirma que los SKU son los definitivos.
 6. Revisa la tienda: las tallas agotadas aparecen deshabilitadas con la leyenda "Agotado" y no se pueden añadir a la bolsa.
 7. Repite el conteo cada vez que haya devoluciones o mermas; queda registrado con fecha y motivo.
+
+## SQLite y persistencia en Render
+
+El único motor es `node:sqlite`, integrado en **Node 24.14.0**. La API de acceso sigue siendo asíncrona para conservar las funciones existentes, con un ejecutor por transacción y cola para las operaciones ajenas. No hay dependencias de otro motor, ORM ni scripts de copia entre motores.
+
+Según el propietario, la aplicación ya está desplegada en el **Web Service Node offcode2**, repositorio **cruz-torres-dev/offcode2**, rama **main**, dominio **https://offcode.mx**. Esto identifica el servicio que debe revisarse; **esta tarea no comprobó el disco, las variables ni la conexión de producción**.
+
+Comprobaciones manuales del propietario antes de publicar el commit:
+
+1. Revisar el servicio **existente** `offcode2`; no crear otro servicio ni aplicar un blueprint para reemplazarlo. Confirmar una instancia Node y un disco persistente montado en `/var/data`.
+2. Confirmar `DATABASE_PATH=/var/data/offcode.sqlite`. Localmente el valor predeterminado sigue siendo `./data/offcode.sqlite`. En Render el arranque normal rechaza una ruta ausente o diferente; no selecciona otra base silenciosamente. Si hay datos en otra ruta, detenerse y revisar el respaldo y su traslado manual antes de cambiar la variable. El código no importa datos de otro servicio ni mueve archivos.
+3. Con la aplicación detenida, respaldar la base, los archivos `-wal`/`-shm` si existen y el journal `<DATABASE_PATH>.email-outbox/`. Conservarlos juntos y fuera de Git; no borrar ni truncar archivos para forzar el arranque. Si existe `EMAIL_OUTBOX_DIR`, conservar ese journal también y confirmar que su ruta está en el disco persistente; no iniciar uno nuevo perdiendo la deduplicación.
+4. Mantener **la misma** `SETTINGS_ENCRYPTION_KEY`, la contraseña y las variables privadas de Envia y Resend. El repositorio no modifica el dashboard. Eliminar manualmente cualquier selector de motor incompatible solo después de confirmar la ruta SQLite; `DB_DRIVER=sqlite` también se acepta por compatibilidad. Las demás variables de conexión antiguas no son utilizadas por la aplicación.
+5. Revisar `NODE_VERSION=24.14.0`, `NODE_ENV=production`, `HOST=0.0.0.0`, el `PORT` asignado por Render y `PUBLIC_ORIGIN=https://offcode.mx`. Mantener los pedidos desactivados hasta validar los datos y existencias reales. Si el panel ya tiene configuración guardada, su interruptor de pedidos prevalece sobre la variable inicial; no cambiar claves para eludirlo.
+6. Instalar/validar con `npm ci`, iniciar con `npm start`; no hay compilación. Las migraciones se aplican al arrancar en la base **seleccionada**, sin borrar datos. No ejecutarlas contra producción durante esta tarea.
+7. Tras decidir publicar y revisar el despliegue, comprobar `/api/config`, acceso privado, catálogo, conteos de inventario/reservas y pedidos existentes. Reiniciar en una ventana de mantenimiento y confirmar que persisten. La inicialización no crea pedidos ficticios ni configura existencias.
+
+No se deben reemplazar las credenciales existentes por valores de `.env.example`. El código crea únicamente el directorio y las estructuras que faltan, rechaza la ubicación pública `dist/` y no habilita ventas automáticamente. El propietario indica que aún no hay pedidos reales, pero eso no autoriza borrar la base.
 
 ## Correo transaccional (Resend)
 
@@ -165,7 +184,7 @@ Las repeticiones y las transiciones inválidas responden 409 y no generan correo
 
 ### Fiabilidad, duplicados y reintentos
 
-El registro vive en un journal aparte junto a la base: `<DATABASE_PATH>.email-outbox/` (por ejemplo `data/offcode.sqlite.email-outbox/`), excluido de Git. No cambia el esquema SQLite ni las tablas de pedidos y guías.
+El registro vive en un journal aparte junto a la base: `<DATABASE_PATH>.email-outbox/` (por ejemplo `data/offcode.sqlite.email-outbox/`), o en `EMAIL_OUTBOX_DIR` si ya se define (debe estar también en almacenamiento persistente), excluido de Git. No cambia el esquema ni las tablas de pedidos y guías.
 
 - Cada notificación se identifica con un hash de referencia + estado + destinatario. Repetir la solicitud, recargar el panel o reiniciar el proceso no duplica el envío.
 - El trabajo se escribe en disco **antes** de llamar a Resend. El reintento reutiliza la misma `Idempotency-Key` y el mismo cuerpo, así que el proveedor no crea un segundo mensaje.
@@ -215,7 +234,7 @@ Campañas masivas, mensajes automáticos de WhatsApp, envío del PDF de la guía
 
 ## Ejecutar sin publicar
 
-Necesitas Node.js **24.14.x**. No hay paquetes npm que instalar ni proceso de compilación. El visor 3D ya está incluido localmente. SQLite forma parte de Node y emite el aviso de API experimental en esta versión.
+Necesitas Node.js **24.14.x**. No hay proceso de compilación. El visor 3D ya está incluido localmente. SQLite forma parte de Node y emite el aviso de API experimental en esta versión. No hay dependencias npm externas. Ejecuta `npm ci` para validar el lockfile.
 
 1. Copia `.env.example` a `.env` y edita la copia en tu equipo.
 2. Define ADMIN_PASSWORD, con al menos 16 caracteres. No existe una contraseña predeterminada. No compartas esa clave con compradores.
@@ -275,13 +294,13 @@ Los cambios se aplican sin reiniciar. Guardar invalida cotizaciones anteriores p
 
 La sección “Mi acceso” permite cambiar la contraseña y cierra todas las sesiones. Se guarda únicamente un hash scrypt con sal aleatoria; la contraseña inicial ADMIN_PASSWORD deja de ser válida después del cambio, incluso tras reiniciar. Cambiar solo esa variable no sobrescribe una contraseña cambiada en el panel.
 
-Recuperación administrativa si se pierde la contraseña: quien controla el hosting debe detener la aplicación, respaldar la base y la clave original, definir una nueva ADMIN_PASSWORD privada de al menos 16 caracteres y eliminar únicamente la fila de `owner_auth` en una consola SQLite local del servidor: `DELETE FROM owner_auth WHERE id=1;`. Al reiniciar usa la contraseña inicial nueva. No borres pedidos, owner_settings ni la clave de cifrado. Esta recuperación requiere acceso técnico al servidor y no está expuesta en una ruta pública. No se ha ejecutado contra datos reales.
+Recuperación administrativa si se pierde la contraseña: quien controla el hosting debe detener la aplicación, respaldar la base y la clave original, definir una nueva ADMIN_PASSWORD privada de al menos 16 caracteres y eliminar únicamente la fila de `owner_auth` en una consola local del servidor: `DELETE FROM owner_auth WHERE id=1;`. Al reiniciar usa la contraseña inicial nueva. No borres pedidos, owner_settings ni la clave de cifrado. Esta recuperación requiere acceso técnico al servidor y no está expuesta en una ruta pública. No se ha ejecutado contra datos reales.
 
 La configuración guardada en el panel prevalece sobre las variables iniciales BANK__, ENVIA__, SALES_WHATSAPP, PRIVACY_URL, TERMS_URL y ORDERS_ENABLED. Cambia esos valores desde el panel después de su primer guardado. PUBLIC_ORIGIN, DATABASE_PATH, la clave de cifrado y las opciones de hosting siguen siendo variables del servidor. Conserva juntas las copias de la base y, por separado, la clave; perder esta última impide recuperar la configuración cifrada.
 
 ## Publicación y almacenamiento
 
-El plan de entrada elegido es `0.5c-512mb` (0.5 CPU / 512 MB RAM) en `render-orders.yaml`, con una instancia y 1 GB de disco. La configuración sigue sin aplicarse. Referencia consultada el 16 de octubre de 2026: $7 USD/mes de servicio más $0.25 USD por 1 GB de disco ($7.25 de base), impuestos y tráfico adicional si aplica. El dominio ya pertenece al propietario. Conserva el workspace Hobby sin cuota si sus funciones son suficientes. `1c-2g` (1 CPU / 2 GB RAM, $25/mes de servicio) es una alternativa si las mediciones indican que hace falta. El propietario contrata esos servicios en su cuenta; todavía no se ha contratado este Web Service.
+El servicio existente es `offcode2`, según el propietario. `render-orders.yaml` es una referencia para una instancia y un disco; no se ha aplicado desde esta tarea ni se verificó el plan contratado. El dominio pertenece al propietario. Revisar el plan y la facturación actual en Render antes de cualquier cambio; esta tarea no modifica recursos contratados.
 
 En el servicio Node de pago activa Settings → Edge Caching → **All files**, porque la lista de tipos comunes no incluye GLB ni HTML. El código permite cachear solamente la portada y los recursos públicos; API, checkout, panel y errores responden `no-store`. No fuerces caché sobre rutas privadas. Comprueba el encabezado CF-Cache-Status al solicitar una imagen o el modelo por segunda vez. La CDN se activa en el dashboard, no mediante este cambio local. Referencia: [Render: caché para Web Services](https://render.com/docs/web-service-caching).
 
@@ -289,20 +308,20 @@ TRUST_RENDER_PROXY=true se configura únicamente en el servicio de Render para i
 
 La caché reduce carga del proceso, pero el ancho de banda sigue contando. Revisa Billing y Metrics antes del anuncio, el método de pago y los avisos de consumo. Si no hay método de pago y se agota el tráfico incluido, los servicios pueden suspenderse. Referencia: [Render: outbound bandwidth](https://render.com/docs/outbound-bandwidth).
 
-Con SQLite y disco hay una sola instancia; Render no permite añadir réplicas a ese servicio. Para escalado horizontal harían falta base de datos y sesiones compartidas y coordinación de operaciones de guía. Cambiar el plan de una instancia con disco implica una interrupción breve: ajusta y prueba antes del evento. No se ha validado una capacidad de visitantes simultáneos en Render.
+Con SQLite y disco hay una sola instancia; Render no permite añadir réplicas a ese servicio. El escalado horizontal exigiría un rediseño de la persistencia compartida, sesiones y coordinación de guías; no forma parte de esta aplicación SQLite. Cambiar el plan de una instancia con disco implica una interrupción breve: ajusta y prueba antes del evento. No se ha validado una capacidad de visitantes simultáneos en Render.
 
 `render.yaml` conserva la presentación estática. Subir los archivos Node a un Static Site no ejecuta la API ni guarda solicitudes.
 
-`render-orders.yaml` es una configuración opcional para un Web Service Node con disco persistente. **No está aplicada ni desplegada.** El servicio y el disco son recursos de pago; no corresponden al alojamiento estático gratuito.
+`render-orders.yaml` documenta la referencia de configuración del servicio Node existente con disco persistente. **No se ha aplicado desde esta tarea.** El servicio y el disco son recursos de pago; no corresponden al alojamiento estático gratuito.
 
-Para usar esa alternativa, configura en Render:
+Verifica estos valores en el servicio existente, sin sobrescribir su configuración privada:
 
 - Node 24.14.0, Build Command `echo No build required`, Start Command `npm start`.
-- HOST=0.0.0.0 y NODE_ENV=production. Al inicio omite PUBLIC_ORIGIN para usar la URL de Render; después define el dominio HTTPS real ya verificado.
+- HOST=0.0.0.0, NODE_ENV=production y PUBLIC_ORIGIN=https://offcode.mx.
 - Disco persistente montado en `/var/data` y DATABASE_PATH=/var/data/offcode.sqlite.
-- ADMIN_PASSWORD inicial y SETTINGS_ENCRYPTION_KEY aleatoria, ambas privadas. Después el propietario completa sus datos y token desde `/settings.html`.
+- Conservar ADMIN_PASSWORD y SETTINGS_ENCRYPTION_KEY existentes, ambas privadas; no reemplazar la clave que cifra los ajustes guardados.
 - Las demás variables indicadas arriba; las ventas continúan desactivadas hasta completar todo.
-- Una sola instancia de aplicación con este disco SQLite. Para varias instancias habrá que migrar a una base de datos compartida.
+- Una sola instancia de aplicación con este disco SQLite. Las sesiones viven en memoria: escalar a varias instancias requeriría rediseñar la persistencia compartida, sesiones y coordinación de guías; no está implementado.
 
 ### Desplegar esta versión (catálogo e inventario)
 
@@ -310,9 +329,9 @@ Para usar esa alternativa, configura en Render:
 2. El despliegue debe usar el **Web Service Node**, no el sitio estático. `render.yaml` describe el sitio estático (`offcode-demo`, publica `./dist`) y no ejecuta la API: en él la tienda se ve, pero los pedidos, el panel y Envia no funcionan. `render-orders.yaml` describe el servicio Node con disco; Render solo lee `render.yaml` por defecto, así que ese archivo **no crea nada por sí solo**.
 3. Confirma antes de desplegar: `DATABASE_PATH=/var/data/offcode.sqlite`, disco montado en `/var/data`, `HOST=0.0.0.0`, `NODE_ENV=production`, `NODE_VERSION=24.14.0`, `ADMIN_PASSWORD` y `SETTINGS_ENCRYPTION_KEY` definidas en el panel (nunca en el repositorio).
 4. Mantén `ORDERS_ENABLED=false` y `ENVIA_ENABLED=false` en el primer arranque.
-5. Al arrancar, la migración crea las tablas de catálogo e inventario si no existen y deja `PRAGMA user_version = 1`. **No borra pedidos ni productos**: si las tablas ya existen, no hace nada. La hoodie se siembra solo si la tabla `products` está vacía y **sin existencias** (`configured = 0`).
-6. Revisa los registros de arranque: debe aparecer una sola línea `OFFCODE: https://… · operación en /admin.html`. Un ciclo de reinicios suele indicar que falta `ADMIN_PASSWORD`, que `PUBLIC_ORIGIN` no es un origen HTTPS exacto o que `validateActivation` rechazó la configuración.
-7. Después del despliegue, define `PUBLIC_ORIGIN` con el dominio HTTPS exacto y vuelve a desplegar. Si el dominio no coincide, las peticiones `POST` del panel y del checkout responden 403 (protección de origen), que es el comportamiento correcto.
+5. Al arrancar, la migración crea las tablas de catálogo e inventario si no existen y deja `PRAGMA user_version = 1`. **No borra pedidos ni productos**. La hoodie se siembra solo al migrar desde una versión menor, con siembra habilitada y tabla `products` vacía, **sin existencias** (`configured = 0`).
+6. Revisa los registros de arranque: deben indicar la URL y la ruta SQLite seleccionada, sin credenciales. Un ciclo de reinicios suele indicar que falta `ADMIN_PASSWORD`, que `PUBLIC_ORIGIN` no es un origen HTTPS exacto o que `validateActivation` rechazó la configuración.
+7. Confirma `PUBLIC_ORIGIN=https://offcode.mx` en el servicio existente antes de publicar la actualización. Si el dominio no coincide, las peticiones `POST` del panel y del checkout responden 403 (protección de origen), que es el comportamiento correcto.
 8. Comprueba `/api/config` (200, JSON, `Cache-Control: no-store`), `/admin.html` (200, `no-store`) y `/api/admin/summary` sin sesión (401). No marques pedidos como pagados ni generes guías para "probar".
 9. Cuando el inventario físico esté contado y la cuenta de Envia validada, registra las entradas reales en el panel y solo entonces activa las ventas.
 
@@ -328,7 +347,7 @@ Las direcciones de clientes se guardan en el archivo SQLite privado y no se publ
 
 Ejecuta `npm test`. Las pruebas usan datos ficticios y comprueban el ciclo completo, totales del servidor, persistencia tras reinicio, reintentos sin duplicados, control de versiones, acceso privado, rechazo de cambios de estado inválidos y bloqueo de ventas sin configurar.
 
-La suite tiene 47 pruebas aprobadas. Además del flujo de pedidos, configuración cifrada, token oculto, persistencia de credenciales, cierre de sesiones al cambiar contraseña, invalidación de tarifas al editar datos, cuenta bancaria acordada, búsqueda de pedidos fuera de la primera página y URL automática de Render con prioridad del dominio explícito, cubre el catálogo y el inventario:
+La suite tiene 58 pruebas aprobadas con Node 24.14.0, sin omisiones. Además del flujo de pedidos, configuración cifrada, token oculto, persistencia de credenciales, cierre de sesiones al cambiar contraseña, invalidación de tarifas al editar datos, cuenta bancaria acordada, búsqueda de pedidos fuera de la primera página y URL automática de Render con prioridad del dominio explícito, cubre el catálogo y el inventario:
 
 - Migraciones versionadas e idempotentes que conservan productos y pedidos.
 - Crear, editar, publicar, despublicar y archivar sin perder referencias; SKU duplicado rechazado al crear y al editar.
@@ -340,6 +359,8 @@ La suite tiene 47 pruebas aprobadas. Además del flujo de pedidos, configuració
 - Un pedido histórico no cambia al editar o archivar el producto.
 - Sin sesión o desde otro origen no se administra catálogo ni inventario; precios negativos y rutas de imagen con `..` se rechazan.
 - Una solicitud duplicada y un fallo de correo no reservan dos veces ni filtran secretos.
+
+`tests/database.test.mjs` comprueba SQLite real en bases temporales: esquema completo, índices y restricciones, migraciones repetidas sobre esquema anterior sin perder pedidos, rechazo de una versión futura sin tocar tablas, creación del directorio privado y persistencia de inventario/reservas/movimientos al reabrir. Verifica que las operaciones externas esperen al rollback de una transacción pausada, además de última unidad, rollback, cobro/cancelación y acceso privado. `tests/catalog.test.mjs` también prueba ocho reintentos HTTP concurrentes idénticos: un pedido y una reserva, sin errores ni duplicados.
 
 La UI de configuración y el flujo hasta una guía ficticia se revisaron en escritorio de 1440 px y móvil de 390 px; la configuración también se comprobó a 320 px, sin desplazamiento horizontal. El panel nuevo se revisó en escritorio de 1280 px y móvil de 390 px: las seis secciones, la tabla de inventario convertida en fichas apiladas, el diálogo de producto y el de movimientos. Capturas en `qa/configuracion-desktop.jpg`, `qa/configuracion-mobile-portada.jpg` y `qa/panel-actualizado-desktop.jpg` (todos sus datos son ficticios).
 
@@ -353,4 +374,7 @@ Para revisar la interfaz sin cuenta ni datos reales, ejecuta `npm run preview:sh
 
 La revisión del navegador usa una base de pruebas en memoria separada. No se hicieron depósitos, no se compraron guías reales, no se enviaron mensajes por WhatsApp y no se envió ningún correo real. El correo transaccional está implementado y desactivado por defecto; las campañas masivas, los mensajes automáticos de WhatsApp, la validación bancaria automática y la gestión de inventario no están implementadas.
 
-No se ha hecho push ni despliegue durante esta implementación.
+Esta entrega crea el commit local solicitado. No hace push, despliegue, cambios del dashboard ni migraciones contra producción.
+
+
+Validación local de esta entrega (17 de octubre de 2026): `npm ci` sin dependencias externas ni vulnerabilidades informadas; `npm test` con 58/58 aprobadas; sintaxis de 31 archivos JS/MJS correcta y `git diff --check` sin errores. `npm run check:load`: 600 consultas de recursos, 120 pedidos y 120 reintentos, cero errores y 120 pedidos únicos en SQLite temporal. Reporte: `qa/load-local.json`. No certifica capacidad ni persistencia del servicio de Render. Los helpers de carga y vista ficticia deshabilitan explícitamente el transporte de correo, incluso si el entorno contiene credenciales.

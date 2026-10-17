@@ -6,12 +6,17 @@ import { createEmailTransport, renderEmailV1, validEmail } from "./email.mjs";
 const events = new Set(["requested", "awaiting_transfer", "paid", "shipped", "delivered", "cancelled"]);
 const windowMs = 23 * 60 * 60 * 1000; // Margin below Resend's 24-hour idempotency retention.
 
-// Sidecar journal: no change to SQLite schema, orders or shipping transactions.
-// A single application instance owns this directory, like the existing SQLite service.
-export function createEmailOutbox({ databasePath, listOrders, env, fetcher, logger = console.info,
+// Sidecar journal: no change to the database schema, orders or shipping
+// transactions. A single application instance owns this directory, like the
+// SQLite service itself. An explicit directory preserves existing journals.
+export async function createEmailOutbox({ databasePath, outboxDirectory, listOrders, env, fetcher, logger = console.info,
   now = Date.now, timeoutMs, autoStart = true } = {}) {
   const transport = createEmailTransport({ env, fetcher, timeoutMs });
-  const directory = databasePath === ":memory:" ? null : path.resolve(databasePath + ".email-outbox");
+  const directory = outboxDirectory
+    ? path.resolve(outboxDirectory)
+    : databasePath === ":memory:"
+      ? null
+      : path.resolve(databasePath + ".email-outbox");
   const jobs = new Map();
   const orderStatuses = new Map();
   let healthy = true, stopped = false, active = null, timer;
@@ -79,7 +84,8 @@ export function createEmailOutbox({ databasePath, listOrders, env, fetcher, logg
       }
     }
     // First installation never sends a backlog of historical orders.
-    for (const order of listOrders()) capture(order, !initialized);
+    // listOrders is async now: orders live behind the shared data layer.
+    for (const order of await listOrders()) capture(order, !initialized);
     if (!healthy) throw Error();
     if (!initialized) persist("initialized.json", { version: 1 });
     for (const job of jobs.values()) if (job.state === "sending")

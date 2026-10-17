@@ -277,66 +277,69 @@ export function publicSettings(value) {
   const { token, ...envia } = value.envia;
   return { ...value, envia: { ...envia, tokenConfigured: !!token } };
 }
+// Encrypted single-row settings. The SQLite migration preserves existing rows.
 export function settingsStore(db, keyText = "") {
   if (keyText && !/^[a-f0-9]{64}$/i.test(keyText))
     throw Error(
       "SETTINGS_ENCRYPTION_KEY debe ser una clave aleatoria de 64 caracteres hexadecimales.",
     );
   const key = keyText ? Buffer.from(keyText, "hex") : null;
-  db.exec(
-    "CREATE TABLE IF NOT EXISTS owner_settings (id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL,nonce BLOB NOT NULL,tag BLOB NOT NULL,payload BLOB NOT NULL,updated_at TEXT NOT NULL);",
-  );
-  function read() {
-    const row = db.prepare("SELECT * FROM owner_settings WHERE id=1").get();
+  // SQLite blobs may be Uint8Array; normalize them for authenticated decryption.
+  const bytes = (value) => (Buffer.isBuffer(value) ? value : Buffer.from(value));
+  async function read() {
+    const row = await db.get("SELECT * FROM owner_settings WHERE id=1");
     if (!row) return null;
     if (!key)
       throw Error(
         "La configuración guardada requiere su SETTINGS_ENCRYPTION_KEY original.",
       );
     try {
-      const decipher = createDecipheriv("aes-256-gcm", key, row.nonce);
+      const decipher = createDecipheriv("aes-256-gcm", key, bytes(row.nonce));
       decipher.setAAD(Buffer.from(`offcode-settings-v1:${row.version}`));
-      decipher.setAuthTag(row.tag);
+      decipher.setAuthTag(bytes(row.tag));
       const value = JSON.parse(
         Buffer.concat([
-          decipher.update(row.payload),
+          decipher.update(bytes(row.payload)),
           decipher.final(),
         ]).toString("utf8"),
       );
-      return { value, version: row.version, updatedAt: row.updated_at };
+      return { value, version: Number(row.version), updatedAt: row.updated_at };
     } catch {
       throw Error(
         "No se pudo abrir la configuración cifrada. Revisa la clave original y el respaldo antes de continuar.",
       );
     }
   }
-  function save(value, version) {
+  async function save(value, version) {
     if (!key)
       throw error(
         "Configura SETTINGS_ENCRYPTION_KEY en el servidor antes de guardar datos privados.",
       );
-    const current =
-      db.prepare("SELECT version FROM owner_settings WHERE id=1").get()
-        ?.version ?? 0;
-    if (version !== current)
-      throw Object.assign(
-        new Error("La configuración cambió. Recarga antes de guardar."),
-        { status: 409 },
+    return db.tx(async (exec) => {
+      const current =
+        Number((await exec.get("SELECT version FROM owner_settings WHERE id=1"))?.version) || 0;
+      if (version !== current)
+        throw Object.assign(
+          new Error("La configuración cambió. Recarga antes de guardar."),
+          { status: 409 },
+        );
+      const next = version + 1,
+        nonce = randomBytes(12),
+        cipher = createCipheriv("aes-256-gcm", key, nonce);
+      cipher.setAAD(Buffer.from(`offcode-settings-v1:${next}`));
+      const payload = Buffer.concat([
+          cipher.update(JSON.stringify(value), "utf8"),
+          cipher.final(),
+        ]),
+        tag = cipher.getAuthTag(),
+        now = new Date().toISOString();
+      await exec.run(
+        "INSERT INTO owner_settings(id,version,nonce,tag,payload,updated_at) VALUES(1,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,nonce=excluded.nonce,tag=excluded.tag,payload=excluded.payload,updated_at=excluded.updated_at",
+        [next, nonce, tag, payload, now],
       );
-    const next = version + 1,
-      nonce = randomBytes(12),
-      cipher = createCipheriv("aes-256-gcm", key, nonce);
-    cipher.setAAD(Buffer.from(`offcode-settings-v1:${next}`));
-    const payload = Buffer.concat([
-        cipher.update(JSON.stringify(value), "utf8"),
-        cipher.final(),
-      ]),
-      tag = cipher.getAuthTag(),
-      now = new Date().toISOString();
-    db.prepare(
-      "INSERT INTO owner_settings(id,version,nonce,tag,payload,updated_at) VALUES(1,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,nonce=excluded.nonce,tag=excluded.tag,payload=excluded.payload,updated_at=excluded.updated_at",
-    ).run(next, nonce, tag, payload, now);
-    return { version: next, updatedAt: now };
+      return { version: next, updatedAt: now };
+    });
   }
+
   return { read, save, keyConfigured: !!key };
 }

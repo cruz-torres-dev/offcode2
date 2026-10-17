@@ -9,7 +9,7 @@ La landing VIP se retiró del sitio publicado. Sus fuentes están en `archive/vi
 ## Probar localmente
 
 - Presentación: `python -m http.server 8000 --directory dist`; abrir http://localhost:8000.
-- Servidor: copiar `.env.example` a `.env`, configurar la contraseña privada y ejecutar `npm start`. Node.js **24.14.x**, sin instalar paquetes ni compilar. SQLite viene incluido y emite un aviso experimental.
+- Servidor: copiar `.env.example` a `.env`, configurar la contraseña privada y ejecutar `npm start`. Node.js **24.14.0** y SQLite integrado en Node (aviso experimental). Ejecutar `npm ci` para validar el lockfile; no hay dependencias externas ni compilación.
 - Flujo ficticio completo: `npm run preview:shipping`; abrir http://127.0.0.1:8013. Contraseña del panel de esta vista: **solo-pruebas-fedex-ficticias**. Datos en memoria, sin llamadas a Envia ni guías reales. Detener con Ctrl+C.
 - Pruebas: `npm test`.
 - Correo transaccional opcional: desactivado por defecto (`EMAIL_ENABLED=false`). Configuración, DNS y prueba controlada en [OPERACION.md](OPERACION.md#correo-transaccional-resend).
@@ -23,7 +23,9 @@ Sigue [OPERACION.md](OPERACION.md) antes de habilitar ventas. El propietario pue
 - `dist/checkout.html` / `checkout.js`: dirección, consentimiento, cotización FedEx y solicitud.
 - `dist/admin.html` / `admin.js`: panel con seis secciones (resumen, pedidos, productos, inventario, envíos y configuración).
 - `dist/admin.css`: tema oscuro editorial del panel; no afecta a la tienda ni a la configuración.
-- `server/server.mjs`: API, sesiones y persistencia SQLite.
+- `server/server.mjs`: API, sesiones y arranque del servidor.
+- `server/database.mjs`: acceso SQLite con cola asíncrona, transacciones aisladas y validación de la ruta privada.
+- `server/schema.mjs`: DDL real por motor —tablas, índices, restricciones y claves foráneas— y orden de tablas.
 - `server/db.mjs`: esquema versionado y migraciones idempotentes de catálogo e inventario.
 - `server/catalog-store.mjs`: productos, variantes, inventario, reservas y pedidos en una transacción.
 - `server/catalog.mjs`: datos comerciales confirmados de la prenda, tallas contempladas y estructura de medidas.
@@ -57,6 +59,16 @@ Al crear un pedido el servidor valida variante, precio y stock, y reserva las un
 La tienda consume el catálogo administrado: solo se ofrecen las tallas con variante activa, las agotadas aparecen deshabilitadas con la leyenda "Agotado" y el precio sale del catálogo. La guía de tallas muestra la disponibilidad real y la bolsa se vuelve a validar en el servidor.
 
 Migraciones versionadas con `PRAGMA user_version`, idempotentes y transaccionales; la ruta de la base de datos no cambia. Detalle de tablas, estados, movimientos, límites y pasos de activación: [OPERACION.md](OPERACION.md#catálogo-administrable-inventario-y-migraciones).
+
+## SQLite y disco persistente en Render
+
+SQLite es la única base de datos, mediante `node:sqlite`. La interfaz asíncrona de `server/database.mjs` conserva catálogo, variantes, inventario, reservas, pedidos y configuración cifrada. Cada transacción usa `BEGIN IMMEDIATE`; las consultas ajenas esperan al commit o rollback. La creación del pedido y la reserva son atómicas, al igual que el pago o cancelación y sus movimientos de inventario.
+
+Localmente se usa `DATABASE_PATH=./data/offcode.sqlite`. En Render debe ser `/var/data/offcode.sqlite`, con disco persistente montado en `/var/data`. El servidor crea el directorio privado si falta y rechaza rutas dentro de `dist/`. En el arranque normal de Render exige la ruta explícita: no elige una base local vacía silenciosamente. Un selector de motor antiguo incompatible se rechaza antes de abrir la base; no se cambia ninguna variable privada desde este repositorio.
+
+Las migraciones SQLite conservan `PRAGMA user_version=1`, crean las estructuras que falten y no duplican productos ni movimientos. Solo si la versión anterior es menor y `products` está vacía se siembra la hoodie, sin existencias configuradas. Un esquema más reciente se rechaza sin modificar tablas. No se borra ni reemplaza una base existente.
+
+Comprobaciones locales: `npm ci`, `npm test`, `npm run check:load`. El servidor existente es **offcode2**, rama **main**, dominio **https://offcode.mx**, según el propietario. El disco y la configuración real no se comprobaron desde esta tarea. Pasos manuales: [OPERACION.md](OPERACION.md#sqlite-y-persistencia-en-render).
 
 ## Correo transaccional (17 de octubre de 2026)
 
@@ -117,9 +129,9 @@ La portada incluye variantes WebP de 640 y 1170 px con selección por ancho de p
 
 ## Render para la campaña
 
-El plan de entrada elegido es el Web Service **0.5c-512mb (0.5 CPU / 512 MB RAM)** y un disco persistente de 1 GB. Está propuesto en `render-orders.yaml`; **no se ha contratado ni desplegado**. Referencia consultada el 16 de octubre de 2026: $7 USD/mes de cómputo y $0.25 USD/mes por 1 GB de disco ($7.25 de base), más impuestos y tráfico adicional si aplica. El dominio ya pertenece al propietario. El plan `1c-2g` de $25 es una alternativa si las mediciones indican que hace falta más capacidad. Revisa [precios de Render](https://render.com/pricing) antes de contratar. El workspace puede permanecer en Hobby sin cuota; su plan es distinto del tamaño del servidor.
+El propietario confirma que el Web Service Node **offcode2**, conectado a **cruz-torres-dev/offcode2**, rama **main**, ya está desplegado y usa **https://offcode.mx**. Esta entrega prepara una actualización local; no crea servicios ni verifica el estado del alojamiento. `render-orders.yaml` sirve de referencia para una instancia con disco; no se ha aplicado desde esta tarea.
 
-Para el primer despliegue deja PUBLIC_ORIGIN sin definir: en Render el servidor usa su RENDER_EXTERNAL_URL HTTPS automática. Al verificar y conectar el dominio propio, define PUBLIC_ORIGIN con ese origen exacto, sin barra final, y utiliza esa dirección para tienda y panel. No importes la URL localhost de `.env.example` en producción.
+Antes de publicar, confirma en el dashboard el disco `/var/data`, `DATABASE_PATH=/var/data/offcode.sqlite` y `PUBLIC_ORIGIN=https://offcode.mx`. Conserva las credenciales y la clave de cifrado existentes. No importes el ejemplo localhost ni cambies la ruta de una base existente sin revisar y respaldar los datos.
 
 Activa **Settings → Edge Caching → All files** en el servicio de pago para que también el modelo GLB y el HTML público puedan servirse desde la CDN. El servidor identifica qué respuestas son públicas: catálogo y recursos sí; API, checkout, administración y errores siempre `no-store`. No configures reglas que fuercen caché de `/api/*`. Valida `CF-Cache-Status` después del despliegue. Esta opción del dashboard no se activa solo por editar el YAML. [Documentación de caché](https://render.com/docs/web-service-caching).
 
@@ -127,30 +139,24 @@ Las imágenes y el MP4 originales permanecen locales, con caché y revalidación
 
 Un Static Site sigue siendo viable para presentar la colección mediante CDN; **por sí solo no ejecuta pedidos ni Envia**. El Web Service gratuito duerme tras inactividad y no admite el disco persistente necesario para esta base local. No lo recomiendo para recibir pedidos durante el concierto. [Limitaciones del servicio gratuito](https://render.com/docs/free).
 
-Esta versión utiliza SQLite y una instancia. Un servicio con disco no puede escalar a varias instancias en Render; para ello habría que migrar a una base compartida, sesiones compartidas y coordinación de guías. [Escalado de Render](https://render.com/docs/scaling). No hay una cifra garantizada de visitantes: hace falta probar la instancia real, observar CPU/RAM/latencias y revisar los límites de Envia antes del anuncio. No cambies el tamaño ni despliegues durante el pico: los cambios con disco tienen una interrupción breve.
+Esta versión utiliza SQLite y una instancia en Render. Un servicio con disco no puede escalar a varias instancias en Render; para ello habría que migrar a una base compartida, sesiones compartidas y coordinación de guías. Las sesiones del panel viven en memoria del proceso, así que **varias instancias no comparten sesión** aunque compartan base. [Escalado de Render](https://render.com/docs/scaling). No hay una cifra garantizada de visitantes: hace falta probar la instancia real, observar CPU/RAM/latencias y revisar los límites de Envia antes del anuncio. No cambies el tamaño ni despliegues durante el pico: los cambios con disco tienen una interrupción breve.
 
 ## Verificación actual
 
-**47 pruebas automáticas aprobadas.** Incluyen pedidos, catálogo administrable, inventario y reservas, VIP archivado/API de datos conservada, FedEx exclusivo, bloqueo de compra duplicada, recuperación tras reinicio, raíz de tienda, caché pública, configuración cifrada, token oculto, cambio de contraseña, invalidación de tarifas, búsqueda de pedidos en todas las páginas y URL inicial automática de Render. No se realizaron pagos ni compras de guías reales.
+**58 pruebas automáticas aprobadas con Node 24.14.0, sin omisiones.** Incluyen pedidos, catálogo administrable, inventario y reservas, VIP archivado/API de datos conservada, FedEx exclusivo, bloqueo de compra duplicada, recuperación tras reinicio, raíz de tienda, caché pública, configuración cifrada, token oculto, cambio de contraseña, invalidación de tarifas, búsqueda de pedidos en todas las páginas, URL inicial automática de Render, esquema completo e idempotente, dos compradores simultáneos por la última unidad, reversión de transacciones, ciclo reserva–cobro–cancelación, rutas privadas, aislamiento de transacciones pausadas y rechazo de motores incompatibles sin filtrar credenciales. No se realizaron pagos ni compras de guías reales.
 
-Prueba de carga local del 16 de octubre de 2026: 600 peticiones al catálogo y recursos con concurrencia 50, 120 solicitudes de pedido con concurrencia 20 y 120 reintentos. Cero respuestas de error y exactamente 120 pedidos únicos guardados. El reporte identifica tiempos y alcance. **Son solicitudes HTTP en loopback, no visitantes ni capacidad certificada de Render.** No incluye tiempos ni límites reales de Envia, CDN, conexión móvil o carga de renderizado 3D en teléfonos.
+Prueba de carga local del 17 de octubre de 2026: 600 peticiones al catálogo y recursos con concurrencia 50, 120 solicitudes de pedido con concurrencia 20 y 120 reintentos. Cero respuestas de error y exactamente 120 pedidos únicos guardados. El reporte identifica tiempos y alcance. **Son solicitudes HTTP en loopback, no visitantes ni capacidad certificada de Render.** No incluye tiempos ni límites reales de Envia, CDN, conexión móvil o carga de renderizado 3D en teléfonos.
 
 La revisión visual usa el navegador integrado en escritorio de 1440 px y móviles de 390 y 320 px, sin desplazamiento horizontal. Se comprobaron la raíz sin VIP, menú móvil, galería y ampliación de espalda, dos prendas L con subtotal $3,300 MXN, navegación a checkout y regreso a la tienda, video vertical 720 × 960 silenciado y giro del monograma. Capturas: `qa/tienda-normal-desktop.jpg` y `qa/tienda-normal-mobile.jpg`. No se verificó en teléfono físico, Safari o Firefox.
 
-Para abrir ventas faltan los datos bancarios y de contacto, políticas reales, token de Envia, origen y perfiles medidos del paquete. La disponibilidad de tallas y la transferencia siguen siendo verificaciones del propietario; no hay inventario automático. No se añadió publicidad sobre un artista ni sobre un concierto que no fuera contenido entregado para publicar.
+Para abrir ventas faltan los datos bancarios y de contacto, políticas reales, token de Envia, origen y perfiles medidos del paquete. El propietario debe contar y registrar las existencias por variante; las reservas y descuentos se aplican después según el estado del pedido. La transferencia sigue verificándose manualmente. No se añadió publicidad sobre un artista ni sobre un concierto que no fuera contenido entregado para publicar.
 
 El propietario puede completar esos datos desde `/settings.html`, con su sesión privada y confirmación de contraseña. El token se guarda cifrado en el servidor y no se devuelve al leer los ajustes. Antes configura ADMIN_PASSWORD y SETTINGS_ENCRYPTION_KEY en las variables privadas; respalda la clave original. El panel permite cambiar su contraseña, comprobar el catálogo de Envia y habilitar pedidos cuando los datos están completos. El detalle de configuración, recuperación, límites y pruebas reales pendientes está en `OPERACION.md`. Las políticas publicadas y los datos del propietario no se generan ni se inventan.
 
 Cambios principales de esta etapa: `dist/settings.html`, `dist/settings.js`, navegación/resumen de `dist/admin.*`, estilos móviles en `dist/operations.css`, enlaces configurables del pie en `dist/index.html` y `dist/app.js`, cifrado en `server/owner-settings.mjs`, APIs en `server/server.mjs`, comprobación de cuenta en `server/envia.mjs`, `tests/settings.test.mjs`, `.env.example` y `render-orders.yaml`.
 
-## Subir a offcode2 cuando lo decidas
+## Revisión antes de publicar
 
-Esta entrega no ejecuta commit, push ni despliegue. Revisa `git status`, `git diff --stat` y `git remote -v` antes de subir. El remoto existente es `https://github.com/cruz-torres-dev/offcode2.git`.
+La entrega incluye un commit local con el mensaje `Use SQLite with persistent Render storage`. No ejecuta push ni despliegue. Revisa `git status`, `git show --stat HEAD` y `git remote -v` antes de decidir publicarlo; el remoto esperado es `https://github.com/cruz-torres-dev/offcode2.git`.
 
-```powershell
-git add dist server tests archive package.json .gitignore .env.example render.yaml render-orders.yaml README.md OPERACION.md qa
-git commit -m "Restaura tienda OFFCODE e integra pedidos y FedEx con Envia"
-git push origin HEAD
-```
-
-Si Render tiene despliegue automático sobre esa rama, el push puede publicar la versión. Revisa primero su configuración. No subas `.env`, tokens, datos bancarios completados, bases SQLite, exportaciones o datos de clientes.
+Un push a main puede activar el despliegue automático del servicio existente. Verifica primero las comprobaciones de almacenamiento descritas en OPERACION.md. No subas `.env`, claves, datos bancarios completados, bases SQLite/WAL/SHM, journals, exportaciones, TECH PACK confidencial ni ZIP de despliegue.

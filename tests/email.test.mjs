@@ -205,7 +205,7 @@ test("Journal durable: reinicio no duplica, reanuda incertidumbre y bloquea rein
 test("Arranque inicial omite histórico; direcciones inválidas y estados superados no se envían", async () => {
   const order = { id: "OF-111111111111", customer, items: [{ size: "M", qty: 1 }], status: "requested", history: [{ status: "requested" }] };
   const calls = [];
-  const box = createEmailOutbox({ databasePath: ":memory:", listOrders: () => [order], env,
+  const box = await createEmailOutbox({ databasePath: ":memory:", listOrders: () => [order], env,
     fetcher: async (...args) => { calls.push(args); return accepted(); }, logger: () => {}, autoStart: false });
   await box.drain();
   assert.equal(calls.length, 0);

@@ -1,8 +1,9 @@
-# Optional alternative to the existing static site. This is NOT deployed automatically.
+# Reference for the existing offcode2 Node service; do not create a replacement.
+# This file does not change the dashboard or deploy automatically.
 # A paid web service and persistent disk are needed for durable SQLite orders.
 services:
   - type: web
-    name: offcode-orders
+    name: offcode2
     runtime: node
     # Selected entry plan; not provisioned by this edit. Measure before the drop.
     plan: 0.5c-512mb

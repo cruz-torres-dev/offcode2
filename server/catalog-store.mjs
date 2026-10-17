@@ -1,7 +1,9 @@
 // Catalog, variants and inventory. Every write goes through the server:
-// the browser never decides prices or stock. SQLite is the only source of truth.
+// the browser never decides prices or stock. The database is the only source
+// of truth; SQLite transactions serialize inventory and order writes.
 import { randomUUID } from "node:crypto";
 import { SIZES, PRODUCT as PRODUCT_FACTS } from "./catalog.mjs";
+import { movementOrder } from "./schema.mjs";
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const text = (value, min, max, label) => {
@@ -55,29 +57,20 @@ export function createCatalogStore(
   { now = () => new Date().toISOString(), randomId = randomUUID } = {},
 ) {
   const id = (prefix) => `${prefix}-${randomId().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
+  const tx = (fn) => db.tx(fn);
 
-  function tx(fn) {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = fn();
-      db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      try {
-        db.exec("ROLLBACK");
-      } catch {}
-      throw error;
-    }
-  }
-
-  const inventoryOf = (variantId) =>
-    db.prepare("SELECT * FROM inventory WHERE variant_id=?").get(variantId) ?? {
-      variant_id: variantId,
-      on_hand: 0,
-      reserved: 0,
-      low_stock_threshold: 0,
-      configured: 0,
-    };
+  const inventoryOf = async (variantId, exec = db) => {
+    const sql = "SELECT * FROM inventory WHERE variant_id=?";
+    return (
+      (await exec.get(sql, [variantId])) ?? {
+        variant_id: variantId,
+        on_hand: 0,
+        reserved: 0,
+        low_stock_threshold: 0,
+        configured: 0,
+      }
+    );
+  };
 
   const available = (variant, product, inventory) => {
     if (!variant || variant.status !== "active") return 0;
@@ -87,8 +80,8 @@ export function createCatalogStore(
       : null; // null = stock control not configured yet
   };
 
-  function variantView(row) {
-    const inventory = inventoryOf(row.id);
+  async function variantView(row, exec = db) {
+    const inventory = await inventoryOf(row.id, exec);
     return {
       id: row.id,
       productId: row.product_id,
@@ -106,14 +99,17 @@ export function createCatalogStore(
     };
   }
 
-  function productView(row) {
-    const images = db
-      .prepare("SELECT id,src,alt,position FROM product_images WHERE product_id=? ORDER BY position")
-      .all(row.id);
-    const variants = db
-      .prepare("SELECT * FROM variants WHERE product_id=? ORDER BY position, size")
-      .all(row.id)
-      .map(variantView);
+  async function productView(row, exec = db) {
+    const images = await exec.all(
+      "SELECT id,src,alt,position FROM product_images WHERE product_id=? ORDER BY position",
+      [row.id],
+    );
+    const variantRows = await exec.all(
+      "SELECT * FROM variants WHERE product_id=? ORDER BY position, size",
+      [row.id],
+    );
+    const variants = [];
+    for (const variant of variantRows) variants.push(await variantView(variant, exec));
     return {
       id: row.id,
       slug: row.slug,
@@ -133,69 +129,76 @@ export function createCatalogStore(
     };
   }
 
-  const listProducts = () =>
-    db
-      .prepare("SELECT * FROM products ORDER BY position, created_at")
-      .all()
-      .map(productView);
+  async function listProducts() {
+    const rows = await db.all("SELECT * FROM products ORDER BY position, created_at");
+    const products = [];
+    for (const row of rows) products.push(await productView(row));
+    return products;
+  }
 
-  const getProduct = (productId) => {
-    const row = db.prepare("SELECT * FROM products WHERE id=?").get(productId);
+  const getProduct = async (productId, exec = db) => {
+    const row = await exec.get("SELECT * FROM products WHERE id=?", [productId]);
     if (!row) throw fail(404, "Producto no encontrado.");
-    return productView(row);
+    return productView(row, exec);
   };
 
   // Public storefront: only published products with active variants.
-  function publicCatalog() {
-    return db
-      .prepare("SELECT * FROM products WHERE status='published' ORDER BY position, created_at")
-      .all()
-      .map((row) => {
-        const variants = db
-          .prepare("SELECT * FROM variants WHERE product_id=? AND status='active' ORDER BY position, size")
-          .all(row.id)
-          .map((variant) => {
-            const inventory = inventoryOf(variant.id);
-            return {
-              id: variant.id,
-              size: variant.size,
-              color: variant.color,
-              sku: variant.sku,
-              available: available(variant, row, inventory),
-              stockConfigured: Boolean(inventory.configured),
-            };
-          });
-        return {
-          id: row.id,
-          slug: row.slug,
-          name: row.name,
-          description: row.description,
-          color: row.color,
-          composition: row.composition,
-          fabricWeightGsm: row.fabric_weight_gsm,
-          fit: row.fit,
-          priceCents: row.price_cents,
-          images: db
-            .prepare("SELECT src,alt FROM product_images WHERE product_id=? ORDER BY position")
-            .all(row.id),
-          variants,
-        };
+  async function publicCatalog() {
+    const rows = await db.all(
+      "SELECT * FROM products WHERE status='published' ORDER BY position, created_at",
+    );
+    const products = [];
+    for (const row of rows) {
+      const variantRows = await db.all(
+        "SELECT * FROM variants WHERE product_id=? AND status='active' ORDER BY position, size",
+        [row.id],
+      );
+      const variants = [];
+      for (const variant of variantRows) {
+        const inventory = await inventoryOf(variant.id);
+        variants.push({
+          id: variant.id,
+          size: variant.size,
+          color: variant.color,
+          sku: variant.sku,
+          available: available(variant, row, inventory),
+          stockConfigured: Boolean(inventory.configured),
+        });
+      }
+      products.push({
+        id: row.id,
+        slug: row.slug,
+        name: row.name,
+        description: row.description,
+        color: row.color,
+        composition: row.composition,
+        fabricWeightGsm: row.fabric_weight_gsm,
+        fit: row.fit,
+        priceCents: row.price_cents,
+        images: await db.all(
+          "SELECT src,alt FROM product_images WHERE product_id=? ORDER BY position",
+          [row.id],
+        ),
+        variants,
       });
+    }
+    return products;
   }
 
-  const saleSizes = () => {
-    const primary = publicCatalog()[0];
+  async function saleSizes() {
+    const primary = (await publicCatalog())[0];
     if (!primary) return [];
     return primary.variants.filter((v) => v.available === null || v.available > 0).map((v) => v.size);
-  };
+  }
 
   // Resolves the browser bag against the database. Price always comes from here.
-  function resolveItems(items) {
+  async function resolveItems(items) {
     if (!Array.isArray(items) || !items.length || items.length > 12)
       throw fail(400, "La bolsa no es válida.");
-    const sizes = saleSizes();
+    const sizes = await saleSizes();
     const seen = new Set();
-    const resolved = items.map((item) => {
+    const resolved = [];
+    for (const item of items) {
       if (!item || typeof item !== "object")
         throw fail(400, "Revisa tallas y cantidades (1–99 por talla).");
       const qty = item.qty;
@@ -203,31 +206,28 @@ export function createCatalogStore(
         throw fail(400, "Revisa tallas y cantidades (1–99 por talla).");
       let row = null;
       if (typeof item.variantId === "string" && item.variantId)
-        row = db
-          .prepare(
-            `SELECT v.*, p.status AS product_status, p.name AS product_name, p.price_cents
-             FROM variants v JOIN products p ON p.id = v.product_id WHERE v.id=?`,
-          )
-          .get(item.variantId);
+        row = await db.get(
+          `SELECT v.*, p.status AS product_status, p.name AS product_name, p.price_cents
+           FROM variants v JOIN products p ON p.id = v.product_id WHERE v.id=?`,
+          [item.variantId],
+        );
       else if (typeof item.productId === "string" && item.productId)
-        row = db
-          .prepare(
-            `SELECT v.*, p.status AS product_status, p.name AS product_name, p.price_cents
-             FROM variants v JOIN products p ON p.id = v.product_id
-             WHERE v.product_id=? AND v.size=? AND v.status='active'`,
-          )
-          .get(item.productId, String(item.size ?? ""));
+        row = await db.get(
+          `SELECT v.*, p.status AS product_status, p.name AS product_name, p.price_cents
+           FROM variants v JOIN products p ON p.id = v.product_id
+           WHERE v.product_id=? AND v.size=? AND v.status='active'`,
+          [item.productId, String(item.size ?? "")],
+        );
       else
         // Legacy carts only send the size: resolve against the primary
         // published product. Current checkout sends productId/variantId.
-        row = db
-          .prepare(
-            `SELECT v.*, p.status AS product_status, p.name AS product_name, p.price_cents
-             FROM variants v JOIN products p ON p.id = v.product_id
-             WHERE v.size=? AND v.status='active' AND p.status='published'
-             ORDER BY p.position LIMIT 1`,
-          )
-          .get(String(item.size ?? ""));
+        row = await db.get(
+          `SELECT v.*, p.status AS product_status, p.name AS product_name, p.price_cents
+           FROM variants v JOIN products p ON p.id = v.product_id
+           WHERE v.size=? AND v.status='active' AND p.status='published'
+           ORDER BY p.position LIMIT 1`,
+          [String(item.size ?? "")],
+        );
       if (!row || row.product_status !== "published" || row.status !== "active")
         throw fail(
           400,
@@ -236,7 +236,7 @@ export function createCatalogStore(
       if (seen.has(row.id))
         throw fail(400, "Revisa tallas y cantidades (1–99 por talla). Cada talla aparece una vez.");
       seen.add(row.id);
-      return {
+      resolved.push({
         productId: row.product_id,
         variantId: row.id,
         sku: row.sku,
@@ -245,38 +245,44 @@ export function createCatalogStore(
         color: row.color,
         qty,
         unitCents: row.price_cents,
-      };
-    });
+      });
+    }
     // Same business rule as before the catalog migration: 99 garments max.
     if (resolved.reduce((sum, item) => sum + item.qty, 0) > 99)
       throw fail(400, "Máximo 99 prendas por solicitud.");
     return resolved;
   }
 
-  function movement(variantId, type, { qty = 0, reservedDelta = 0, reason = "", orderId = null, actor = "owner" } = {}) {
-    const inventory = inventoryOf(variantId);
-    db.prepare(
+  async function movement(
+    variantId,
+    type,
+    { qty = 0, reservedDelta = 0, reason = "", orderId = null, actor = "owner" } = {},
+    exec = db,
+  ) {
+    const inventory = await inventoryOf(variantId, exec);
+    await exec.run(
       `INSERT INTO inventory_movements(id,variant_id,type,qty,reserved_delta,reason,order_id,actor,on_hand_after,reserved_after,created_at)
        VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-    ).run(
-      id("MOV"),
-      variantId,
-      type,
-      qty,
-      reservedDelta,
-      reason,
-      orderId,
-      actor,
-      inventory.on_hand,
-      inventory.reserved,
-      now(),
+      [
+        id("MOV"),
+        variantId,
+        type,
+        qty,
+        reservedDelta,
+        reason,
+        orderId,
+        actor,
+        inventory.on_hand,
+        inventory.reserved,
+        now(),
+      ],
     );
   }
 
   // Must run inside tx(). Re-checks stock atomically to prevent overselling.
-  function reserve(orderId, items) {
+  async function reserve(orderId, items, exec = db) {
     for (const item of items) {
-      const inventory = inventoryOf(item.variantId);
+      const inventory = await inventoryOf(item.variantId, exec);
       if (inventory.configured) {
         const free = inventory.on_hand - inventory.reserved;
         if (item.qty > free)
@@ -284,59 +290,65 @@ export function createCatalogStore(
             409,
             `Sin stock suficiente para la talla ${item.size}. Actualiza tu bolsa antes de enviar la solicitud.`,
           );
-        db.prepare(
+        await exec.run(
           "UPDATE inventory SET reserved = reserved + ?, updated_at=? WHERE variant_id=?",
-        ).run(item.qty, now(), item.variantId);
-        movement(item.variantId, "reserve", { reservedDelta: item.qty, orderId });
+          [item.qty, now(), item.variantId],
+        );
+        await movement(item.variantId, "reserve", { reservedDelta: item.qty, orderId }, exec);
       }
       // Unconfigured stock: the order is recorded but nothing is reserved, so
       // activating inventory later never invents a past reservation.
-      db.prepare(
+      await exec.run(
         `INSERT OR IGNORE INTO order_reservations(order_id,variant_id,qty,state,created_at,updated_at)
-         VALUES(?,?,?,?,?,?)`,
-      ).run(
-        orderId,
-        item.variantId,
-        item.qty,
-        inventory.configured ? "reserved" : "released",
-        now(),
-        now(),
+             VALUES(?,?,?,?,?,?)`,
+        [
+          orderId,
+          item.variantId,
+          item.qty,
+          inventory.configured ? "reserved" : "released",
+          now(),
+          now(),
+        ],
       );
     }
   }
 
-  const pendingReservations = (orderId, state) =>
-    db.prepare("SELECT * FROM order_reservations WHERE order_id=? AND state=?").all(orderId, state);
+  const pendingReservations = async (orderId, state, exec = db) =>
+    exec.all("SELECT * FROM order_reservations WHERE order_id=? AND state=?", [orderId, state]);
 
   // Payment verified: reservation becomes a sale and on_hand drops once.
-  function sell(orderId) {
-    for (const row of pendingReservations(orderId, "reserved")) {
-      const inventory = inventoryOf(row.variant_id);
+  async function sell(orderId, exec = db) {
+    for (const row of await pendingReservations(orderId, "reserved", exec)) {
+      const inventory = await inventoryOf(row.variant_id, exec);
       if (row.qty > inventory.on_hand)
         throw fail(
           409,
           "El inventario físico ya no cubre este pedido. Revisa las existencias antes de confirmar el pago.",
         );
-      db.prepare(
+      await exec.run(
         "UPDATE inventory SET on_hand = on_hand - ?, reserved = reserved - ?, updated_at=? WHERE variant_id=?",
-      ).run(row.qty, row.qty, now(), row.variant_id);
-      db.prepare(
+        [row.qty, row.qty, now(), row.variant_id],
+      );
+      await exec.run(
         "UPDATE order_reservations SET state='sold', updated_at=? WHERE order_id=? AND variant_id=?",
-      ).run(now(), orderId, row.variant_id);
-      movement(row.variant_id, "sale", { qty: -row.qty, reservedDelta: -row.qty, orderId });
+        [now(), orderId, row.variant_id],
+      );
+      await movement(row.variant_id, "sale", { qty: -row.qty, reservedDelta: -row.qty, orderId }, exec);
     }
   }
 
   // Cancellation releases only units still reserved; sold units stay sold.
-  function release(orderId) {
-    for (const row of pendingReservations(orderId, "reserved")) {
-      db.prepare(
-        "UPDATE inventory SET reserved = MAX(0, reserved - ?), updated_at=? WHERE variant_id=?",
-      ).run(row.qty, now(), row.variant_id);
-      db.prepare(
+  async function release(orderId, exec = db) {
+    for (const row of await pendingReservations(orderId, "reserved", exec)) {
+      await exec.run(
+        `UPDATE inventory SET reserved = MAX(0, reserved - ?), updated_at=? WHERE variant_id=?`,
+        [row.qty, now(), row.variant_id],
+      );
+      await exec.run(
         "UPDATE order_reservations SET state='released', updated_at=? WHERE order_id=? AND variant_id=?",
-      ).run(now(), orderId, row.variant_id);
-      movement(row.variant_id, "release", { reservedDelta: -row.qty, orderId });
+        [now(), orderId, row.variant_id],
+      );
+      await movement(row.variant_id, "release", { reservedDelta: -row.qty, orderId }, exec);
     }
   }
 
@@ -357,8 +369,8 @@ export function createCatalogStore(
   }
 
   // Entry, manual adjustment or correction. Never silent, never negative.
-  function recordMovement(variantId, input = {}) {
-    const variant = db.prepare("SELECT * FROM variants WHERE id=?").get(variantId);
+  async function recordMovement(variantId, input = {}) {
+    const variant = await db.get("SELECT * FROM variants WHERE id=?", [variantId]);
     if (!variant) throw fail(404, "Variante no encontrada.");
     const type = input.type;
     if (!["entry", "adjustment", "correction"].includes(type))
@@ -373,8 +385,8 @@ export function createCatalogStore(
     const reason = text(input.reason ?? "", type === "entry" ? 0 : 3, 200, "el motivo");
     if (type !== "entry" && !reason)
       throw fail(400, "El motivo es obligatorio para ajustes y correcciones.");
-    return tx(() => {
-      const inventory = inventoryOf(variantId);
+    return tx(async (exec) => {
+      const inventory = await inventoryOf(variantId, exec);
       const next = inventory.on_hand + qty;
       if (next < 0)
         throw fail(409, "El ajuste dejaría existencias negativas. Revisa el conteo real.");
@@ -383,62 +395,66 @@ export function createCatalogStore(
           409,
           "El ajuste dejaría menos existencias que unidades reservadas. Libera o cierra esas reservas primero.",
         );
-      db.prepare(
-        "UPDATE inventory SET on_hand=?, configured=1, updated_at=? WHERE variant_id=?",
-      ).run(next, now(), variantId);
-      movement(variantId, type, { qty, reason });
-      return variantView(variant);
+      await exec.run("UPDATE inventory SET on_hand=?, configured=1, updated_at=? WHERE variant_id=?", [
+        next,
+        now(),
+        variantId,
+      ]);
+      await movement(variantId, type, { qty, reason }, exec);
+      return variantView(variant, exec);
     });
   }
 
-  function updateInventorySettings(variantId, input = {}) {
-    const variant = db.prepare("SELECT * FROM variants WHERE id=?").get(variantId);
+  async function updateInventorySettings(variantId, input = {}) {
+    const variant = await db.get("SELECT * FROM variants WHERE id=?", [variantId]);
     if (!variant) throw fail(404, "Variante no encontrada.");
     const threshold = input.lowStockThreshold;
     if (!Number.isInteger(threshold) || threshold < 0 || threshold > 100000)
       throw fail(400, "Indica un umbral de stock bajo válido.");
-    return tx(() => {
-      db.prepare(
-        "UPDATE inventory SET low_stock_threshold=?, updated_at=? WHERE variant_id=?",
-      ).run(threshold, now(), variantId);
-      return variantView(variant);
+    return tx(async (exec) => {
+      await exec.run("UPDATE inventory SET low_stock_threshold=?, updated_at=? WHERE variant_id=?", [
+        threshold,
+        now(),
+        variantId,
+      ]);
+      return variantView(variant, exec);
     });
   }
 
-  const listInventory = () =>
-    db
-      .prepare(
-        `SELECT v.*, p.name AS product_name, p.status AS product_status
-         FROM variants v JOIN products p ON p.id=v.product_id
-         ORDER BY p.position, v.position, v.size`,
-      )
-      .all()
-      .map((row) => ({
-        ...variantView(row),
+  async function listInventory() {
+    const rows = await db.all(
+      `SELECT v.*, p.name AS product_name, p.status AS product_status
+       FROM variants v JOIN products p ON p.id=v.product_id
+       ORDER BY p.position, v.position, v.size`,
+    );
+    const variants = [];
+    for (const row of rows)
+      variants.push({
+        ...(await variantView(row)),
         productName: row.product_name,
         productStatus: row.product_status,
-      }));
+      });
+    return variants;
+  }
 
-  const listMovements = (variantId, limit = 50) =>
-    db
-      .prepare(
-        "SELECT * FROM inventory_movements WHERE variant_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
-      )
-      .all(variantId, Math.min(Math.max(Number(limit) || 50, 1), 200))
-      .map(movementView);
+  async function listMovements(variantId, limit = 50) {
+    const size = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const rows = await db.all(
+      `SELECT * FROM inventory_movements WHERE variant_id=? ORDER BY ${movementOrder()} LIMIT ${size}`,
+      [variantId],
+    );
+    return rows.map(movementView);
+  }
 
-  function summary() {
-    const orders = db
-      .prepare("SELECT payload FROM orders")
-      .all()
-      .map((row) => JSON.parse(row.payload));
+  async function summary() {
+    const orders = (await db.all("SELECT payload FROM orders")).map((row) =>
+      JSON.parse(row.payload),
+    );
     const count = (status) => orders.filter((o) => o.status === status).length;
-    const rows = db
-      .prepare(
-        `SELECT i.on_hand, i.reserved, i.low_stock_threshold, i.configured, v.status, p.status AS product_status
-         FROM inventory i JOIN variants v ON v.id=i.variant_id JOIN products p ON p.id=v.product_id`,
-      )
-      .all();
+    const rows = await db.all(
+      `SELECT i.on_hand, i.reserved, i.low_stock_threshold, i.configured, v.status, p.status AS product_status
+       FROM inventory i JOIN variants v ON v.id=i.variant_id JOIN products p ON p.id=v.product_id`,
+    );
     let lowStockVariants = 0,
       lowStockUnits = 0,
       unconfiguredVariants = 0,
@@ -515,140 +531,159 @@ export function createCatalogStore(
     return { name, description, color, composition, fit, fabricWeightGsm, priceCents, status, images, variants };
   }
 
-  function uniqueSlug(base) {
+  async function uniqueSlug(base, exec = db) {
     let candidate = base,
       n = 1;
-    while (db.prepare("SELECT 1 FROM products WHERE slug=?").get(candidate))
+    while (await exec.get("SELECT 1 AS found FROM products WHERE slug=?", [candidate]))
       candidate = `${base}-${++n}`;
     return candidate;
   }
 
-  function assertSkusFree(variants, productId) {
+  async function assertSkusFree(variants, productId, exec = db) {
     const seen = new Set();
     for (const variant of variants) {
       if (seen.has(variant.sku))
         throw fail(409, `El SKU ${variant.sku} está repetido en este producto.`);
       seen.add(variant.sku);
-      const row = db.prepare("SELECT product_id FROM variants WHERE sku=?").get(variant.sku);
+      const row = await exec.get("SELECT product_id FROM variants WHERE sku=?", [variant.sku]);
       if (row && row.product_id !== productId)
         throw fail(409, `El SKU ${variant.sku} ya existe en otro producto.`);
-      const duplicate = db
-        .prepare("SELECT id FROM variants WHERE sku=? AND product_id=?")
-        .get(variant.sku, productId ?? "");
+      const duplicate = await exec.get("SELECT id FROM variants WHERE sku=? AND product_id=?", [
+        variant.sku,
+        productId ?? "",
+      ]);
       if (duplicate && duplicate.id !== variant.id)
         throw fail(409, `El SKU ${variant.sku} está repetido en este producto.`);
     }
   }
 
-  function createProduct(input) {
+  async function createProduct(input) {
     const data = validateProduct(input);
-    assertSkusFree(data.variants, null);
-    return tx(() => {
+    await assertSkusFree(data.variants, null);
+    return tx(async (exec) => {
       const productId = id("PRD");
       const at = now();
-      const position =
-        (db.prepare("SELECT COALESCE(MAX(position),-1)+1 AS n FROM products").get().n ?? 0);
-      db.prepare(
+      const position = (await exec.get("SELECT COALESCE(MAX(position),-1)+1 AS n FROM products")).n ?? 0;
+      await exec.run(
         `INSERT INTO products(id,slug,name,description,color,composition,fabric_weight_gsm,fit,price_cents,status,position,created_at,updated_at)
          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      ).run(
-        productId,
-        uniqueSlug(slugify(data.name)),
-        data.name,
-        data.description,
-        data.color,
-        data.composition,
-        data.fabricWeightGsm,
-        data.fit,
-        data.priceCents,
-        data.status,
-        position,
-        at,
-        at,
+        [
+          productId,
+          await uniqueSlug(slugify(data.name), exec),
+          data.name,
+          data.description,
+          data.color,
+          data.composition,
+          data.fabricWeightGsm,
+          data.fit,
+          data.priceCents,
+          data.status,
+          position,
+          at,
+          at,
+        ],
       );
-      writeImages(productId, data.images);
-      data.variants.forEach((variant, index) => {
-        db.prepare(
+      await writeImages(productId, data.images, exec);
+      for (const [index, variant] of data.variants.entries())
+        await exec.run(
           "INSERT INTO variants(id,product_id,size,color,sku,status,position) VALUES(?,?,?,?,?,?,?)",
-        ).run(id("VAR"), productId, variant.size, variant.color, variant.sku, variant.status, index);
-      });
-      for (const row of db.prepare("SELECT id FROM variants WHERE product_id=?").all(productId))
-        db.prepare(
+          [id("VAR"), productId, variant.size, variant.color, variant.sku, variant.status, index],
+        );
+      const created = await exec.all("SELECT id FROM variants WHERE product_id=?", [productId]);
+      for (const row of created)
+        await exec.run(
           "INSERT INTO inventory(variant_id,on_hand,reserved,low_stock_threshold,configured,updated_at) VALUES(?,0,0,0,0,?)",
-        ).run(row.id, at);
-      return getProduct(productId);
+          [row.id, at],
+        );
+      // Same transaction and same connection: the row was just inserted.
+      return getProduct(productId, exec);
     });
   }
 
-  function writeImages(productId, images) {
-    db.prepare("DELETE FROM product_images WHERE product_id=?").run(productId);
-    images.forEach((image, index) =>
-      db.prepare(
-        "INSERT INTO product_images(id,product_id,src,alt,position) VALUES(?,?,?,?,?)",
-      ).run(id("IMG"), productId, image.src, image.alt, index),
-    );
+  async function writeImages(productId, images, exec = db) {
+    await exec.run("DELETE FROM product_images WHERE product_id=?", [productId]);
+    for (const [index, image] of images.entries())
+      await exec.run("INSERT INTO product_images(id,product_id,src,alt,position) VALUES(?,?,?,?,?)", [
+        id("IMG"),
+        productId,
+        image.src,
+        image.alt,
+        index,
+      ]);
   }
 
-  function updateProduct(productId, input) {
-    const existing = getProduct(productId);
+  async function updateProduct(productId, input) {
+    const existing = await getProduct(productId);
     const data = validateProduct(input, { existing });
     const keptIds = new Set(data.variants.map((v) => v.id).filter(Boolean));
     for (const variant of existing.variants)
       if (!keptIds.has(variant.id) && variant.status === "active")
         data.variants.push({ ...variant, status: "archived", id: variant.id });
-    assertSkusFree(data.variants, productId);
-    return tx(() => {
+    await assertSkusFree(data.variants, productId);
+    return tx(async (exec) => {
       const at = now();
-      db.prepare(
+      await exec.run(
         `UPDATE products SET name=?,description=?,color=?,composition=?,fabric_weight_gsm=?,fit=?,price_cents=?,status=?,updated_at=? WHERE id=?`,
-      ).run(
-        data.name,
-        data.description,
-        data.color,
-        data.composition,
-        data.fabricWeightGsm,
-        data.fit,
-        data.priceCents,
-        data.status,
-        at,
-        productId,
+        [
+          data.name,
+          data.description,
+          data.color,
+          data.composition,
+          data.fabricWeightGsm,
+          data.fit,
+          data.priceCents,
+          data.status,
+          at,
+          productId,
+        ],
       );
-      writeImages(productId, data.images);
-      data.variants.forEach((variant, index) => {
-        if (variant.id && db.prepare("SELECT 1 FROM variants WHERE id=? AND product_id=?").get(variant.id, productId))
-          db.prepare(
-            "UPDATE variants SET size=?,color=?,sku=?,status=?,position=? WHERE id=?",
-          ).run(variant.size, variant.color, variant.sku, variant.status, index, variant.id);
+      await writeImages(productId, data.images, exec);
+      for (const [index, variant] of data.variants.entries()) {
+        const owned = await exec.get("SELECT 1 AS found FROM variants WHERE id=? AND product_id=?", [
+          variant.id ?? "",
+          productId,
+        ]);
+        if (variant.id && owned)
+          await exec.run("UPDATE variants SET size=?,color=?,sku=?,status=?,position=? WHERE id=?", [
+            variant.size,
+            variant.color,
+            variant.sku,
+            variant.status,
+            index,
+            variant.id,
+          ]);
         else {
           const variantId = id("VAR");
-          db.prepare(
+          await exec.run(
             "INSERT INTO variants(id,product_id,size,color,sku,status,position) VALUES(?,?,?,?,?,?,?)",
-          ).run(variantId, productId, variant.size, variant.color, variant.sku, variant.status, index);
-          db.prepare(
+            [variantId, productId, variant.size, variant.color, variant.sku, variant.status, index],
+          );
+          await exec.run(
             "INSERT INTO inventory(variant_id,on_hand,reserved,low_stock_threshold,configured,updated_at) VALUES(?,0,0,0,0,?)",
-          ).run(variantId, at);
+            [variantId, at],
+          );
         }
-      });
-      return getProduct(productId);
+      }
+      return getProduct(productId, exec);
     });
   }
 
   // Publish / unpublish / archive without resending the whole product.
-  function setProductStatus(productId, status) {
-    const existing = getProduct(productId);
+  async function setProductStatus(productId, status) {
+    const existing = await getProduct(productId);
     if (!STATUS.has(status)) throw fail(400, "Estado de producto no válido.");
     if (!TRANSITIONS[existing.status].includes(status))
       throw fail(409, "Cambio de estado del producto no permitido.");
     if (status === "published" && !existing.variants.some((v) => v.status === "active"))
       throw fail(400, "Un producto publicado necesita al menos una variante activa.");
-    db.prepare("UPDATE products SET status=?, updated_at=? WHERE id=?").run(status, now(), productId);
+    await db.run("UPDATE products SET status=?, updated_at=? WHERE id=?", [status, now(), productId]);
     return getProduct(productId);
   }
 
   // /api/config.product keeps its previous shape so the storefront and the
   // size guide keep working, but sizes now come from the managed catalog.
-  function productPayload() {
-    const primary = publicCatalog()[0] ?? null;
+  async function productPayload() {
+    const primary = (await publicCatalog())[0] ?? null;
     if (!primary)
       return {
         name: PRODUCT_FACTS.name,

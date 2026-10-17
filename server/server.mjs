@@ -1,6 +1,6 @@
 import http from "node:http";
 import { createReadStream } from "node:fs";
-import { mkdir, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -10,11 +10,11 @@ import {
   scryptSync,
   timingSafeEqual,
 } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
 import { safeUrl } from "./envia.mjs";
 import { clientIp, staticPolicy } from "./http-policy.mjs";
 import { createEmailOutbox } from "./email-outbox.mjs";
-import { migrate } from "./db.mjs";
+import { migrate, readSchemaVersion } from "./db.mjs";
+import { openDatabase } from "./database.mjs";
 import { createCatalogStore } from "./catalog-store.mjs";
 import {
   initialSettings,
@@ -124,21 +124,18 @@ export async function createApp(options = {}) {
     passwordHash = password ? scryptSync(password, salt, 64) : null;
   const waitlistEnabled =
     options.waitlistEnabled ?? process.env.WAITLIST_ENABLED === "true";
-  const databasePath =
-    options.databasePath ??
-    process.env.DATABASE_PATH ??
-    "./data/offcode.sqlite";
-  if (databasePath !== ":memory:")
-    await mkdir(path.dirname(path.resolve(databasePath)), { recursive: true });
-  const db = new DatabaseSync(databasePath);
-  let store, currentSettings, settingsVersion, settingsUpdatedAt, shipping;
+  const db = await openDatabase({
+    driver: options.driver,
+    path: options.databasePath,
+    env: options.env ?? process.env,
+  });
+  const databasePath = db.describe().path;
+  let store, currentSettings, settingsVersion, settingsUpdatedAt, shipping, freshDatabase;
   try {
-    db.exec(
-      "CREATE TABLE IF NOT EXISTS owner_auth (id INTEGER PRIMARY KEY CHECK(id=1),salt BLOB NOT NULL,hash BLOB NOT NULL,updated_at TEXT NOT NULL);",
-    );
-    const credentials = db
-      .prepare("SELECT salt,hash FROM owner_auth WHERE id=1")
-      .get();
+    // Versioned, idempotent setup. Never drops, never rewrites an existing row.
+    freshDatabase = (await readSchemaVersion(db)) === 0;
+    await migrate(db);
+    const credentials = await db.get("SELECT salt,hash FROM owner_auth WHERE id=1");
     if (credentials) {
       salt = Buffer.from(credentials.salt);
       passwordHash = Buffer.from(credentials.hash);
@@ -147,7 +144,7 @@ export async function createApp(options = {}) {
       db,
       options.settingsKey ?? process.env.SETTINGS_ENCRYPTION_KEY ?? "",
     );
-    const stored = store.read();
+    const stored = await store.read();
     currentSettings = stored?.value ?? initialSettings(options);
     settingsVersion = stored?.version ?? 0;
     settingsUpdatedAt = stored?.updatedAt ?? null;
@@ -163,8 +160,14 @@ export async function createApp(options = {}) {
       throw Error(
         "Completa ADMIN_PASSWORD y PRIVACY_URL HTTPS antes de abrir la lista VIP.",
       );
+    // A brand-new database must never look like a running shop: the counters
+    // would be zero and every past order would silently be missing.
+    if (freshDatabase && production && currentSettings.enabled)
+      throw Error(
+        "La base de datos está recién creada y vacía: no se habilitan ventas reales sobre un esquema nuevo. Migra los pedidos existentes y compara los conteos antes de activar ORDERS_ENABLED.",
+      );
   } catch (e) {
-    db.close();
+    await db.close().catch(() => {});
     throw e;
   }
   let { bank, whatsapp, privacyUrl, termsUrl, enabled } = currentSettings;
@@ -181,28 +184,24 @@ export async function createApp(options = {}) {
     typeof value === "string" &&
     value.length <= 256 &&
     timingSafeEqual(scryptSync(value, salt, 64), passwordHash);
-  db.exec(
-    "PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, request_key TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, payload TEXT NOT NULL);",
-  );
-  db.exec(
-    "CREATE TABLE IF NOT EXISTS vip_members (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, consent_at TEXT NOT NULL, privacy_url TEXT NOT NULL, consent_version TEXT NOT NULL, consent_text TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', withdrawn_at TEXT);",
-  );
-  db.exec(`CREATE TABLE IF NOT EXISTS shipping_quotes (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, order_id TEXT, expires INTEGER NOT NULL, payload TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS shipping_jobs (order_id TEXT PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL);`);
   // A process interrupted during a purchase cannot know whether Envia charged it.
-  db.exec("UPDATE shipping_jobs SET state='uncertain' WHERE state='pending'");
-  // Versioned catalog/inventory schema. Idempotent: re-running keeps every row.
-  migrate(db);
+  await db.run("UPDATE shipping_jobs SET state='uncertain' WHERE state='pending'");
   const catalog = createCatalogStore(db);
-  const email = createEmailOutbox({
+  const email = await createEmailOutbox({
     ...options.email,
     databasePath,
-    listOrders: () => db.prepare("SELECT payload FROM orders").all().map((row) => JSON.parse(row.payload)),
+    outboxDirectory:
+      options.email?.outboxDirectory ??
+      process.env.EMAIL_OUTBOX_DIR,
+    listOrders: async () =>
+      (await db.all("SELECT payload FROM orders")).map((row) => JSON.parse(row.payload)),
   });
   const expireQuotes = () =>
-    db.prepare("DELETE FROM shipping_quotes WHERE expires<?").run(Date.now());
-  expireQuotes();
-  const quoteCleanup = setInterval(expireQuotes, 60e3);
+    db.run("DELETE FROM shipping_quotes WHERE expires<?", [Date.now()]);
+  await expireQuotes();
+  const quoteCleanup = setInterval(() => {
+    expireQuotes().catch(() => {});
+  }, 60e3);
   quoteCleanup.unref();
   const sessions = new Map(),
     limits = new Map();
@@ -227,24 +226,23 @@ export async function createApp(options = {}) {
     });
     res.end(JSON.stringify(data));
   };
-  const summary = (row) => ({
+  const labelJobOf = async (orderId) => {
+    const job = await db.get("SELECT state,payload FROM shipping_jobs WHERE order_id=?", [orderId]);
+    if (!job) return null;
+    const value = JSON.parse(job.payload);
+    return {
+      state: job.state,
+      environment: value.environment,
+      result: value.result ?? null,
+    };
+  };
+  const summary = async (row) => ({
     ...JSON.parse(row.payload),
     version: row.version,
-    labelJob: (() => {
-      const job = db
-        .prepare("SELECT state,payload FROM shipping_jobs WHERE order_id=?")
-        .get(row.id);
-      if (!job) return null;
-      const value = JSON.parse(job.payload);
-      return {
-        state: job.state,
-        environment: value.environment,
-        result: value.result ?? null,
-      };
-    })(),
+    labelJob: await labelJobOf(row.id),
   });
-  const getOrder = (id) => {
-    const row = db.prepare("SELECT * FROM orders WHERE id=?").get(id);
+  const getOrder = async (id) => {
+    const row = await db.get("SELECT * FROM orders WHERE id=?", [id]);
     if (!row) throw httpError(404, "Pedido no encontrado.");
     return summary(row);
   };
@@ -253,22 +251,17 @@ export async function createApp(options = {}) {
       .update(JSON.stringify({ customer, items }))
       .digest("hex");
   // Writes the order payload only. Callers wrap it in catalog.tx() when stock
-  // must change in the same transaction.
-  const persistOrder = (order) => {
+  // must change in the same transaction, and pass the scoped executor so the
+  // write uses the connection that holds the locks.
+  const persistOrder = async (order, exec = db) => {
     const { version, labelJob, ...value } = order;
-    const result = db
-      .prepare(
-        "UPDATE orders SET payload=?,version=version+1 WHERE id=? AND version=?",
-      )
-      .run(JSON.stringify(value), order.id, version);
+    const result = await exec.run(
+      "UPDATE orders SET payload=?,version=version+1 WHERE id=? AND version=?",
+      [JSON.stringify(value), order.id, version],
+    );
     if (!result.changes)
       throw httpError(409, "El pedido cambió. Actualiza el panel.");
     return value;
-  };
-  const saveOrder = (order) => {
-    const value = persistOrder(order);
-    email.capture(value);
-    return getOrder(order.id);
   };
   async function quoteShipping(customer, items, orderId = null) {
     const provider = shipping,
@@ -281,35 +274,39 @@ export async function createApp(options = {}) {
         409,
         "La configuración cambió durante la consulta. Vuelve a cotizar.",
       );
-    db.prepare("DELETE FROM shipping_quotes WHERE expires<?").run(Date.now());
-    return rates.map((rate) => {
+    await db.run("DELETE FROM shipping_quotes WHERE expires<?", [Date.now()]);
+    const quotes = [];
+    for (const rate of rates) {
       const id = randomUUID();
-      db.prepare(
+      await db.run(
         "INSERT INTO shipping_quotes(id,fingerprint,order_id,expires,payload) VALUES(?,?,?,?,?)",
-      ).run(
-        id,
-        fingerprint(customer, items),
-        orderId,
-        expires,
-        JSON.stringify({
-          payload,
-          rate,
-          environment: provider.environment,
-          settingsFingerprint: revision,
-        }),
+        [
+          id,
+          fingerprint(customer, items),
+          orderId,
+          expires,
+          JSON.stringify({
+            payload,
+            rate,
+            environment: provider.environment,
+            settingsFingerprint: revision,
+          }),
+        ],
       );
-      return {
+      quotes.push({
         id,
         ...rate,
         carrier: "FedEx",
         expiresAt: new Date(expires).toISOString(),
-      };
-    });
+      });
+    }
+    return quotes;
   }
-  function chosenQuote(id, customer, items, orderId = null) {
+  async function chosenQuote(id, customer, items, orderId = null) {
     const row =
-      typeof id === "string" &&
-      db.prepare("SELECT * FROM shipping_quotes WHERE id=?").get(id);
+      typeof id === "string"
+        ? await db.get("SELECT * FROM shipping_quotes WHERE id=?", [id])
+        : null;
     if (
       !row ||
       row.expires < Date.now() ||
@@ -362,7 +359,7 @@ export async function createApp(options = {}) {
           throw httpError(403, "Origen no autorizado.");
         const ip = clientIp(req, trustRenderProxy);
         if (route === "/api/config" && req.method === "GET") {
-          const product = catalog.productPayload();
+          const product = await catalog.productPayload();
           return send(res, 200, {
             enabled,
             whatsapp: enabled ? whatsapp : "",
@@ -372,12 +369,12 @@ export async function createApp(options = {}) {
             waitlistEnabled,
             vipConsentVersion: VIP_CONSENT_VERSION,
             product,
-            catalog: catalog.publicCatalog(),
+            catalog: await catalog.publicCatalog(),
             shipping: shippingConfig,
           });
         }
         if (route === "/api/catalog" && req.method === "GET")
-          return send(res, 200, { products: catalog.publicCatalog() });
+          return send(res, 200, { products: await catalog.publicCatalog() });
         if (route === "/api/shipping/states" && req.method === "GET") {
           if (!enabled || !shipping.enabled)
             throw httpError(503, "Envíos todavía no habilitados.");
@@ -397,7 +394,7 @@ export async function createApp(options = {}) {
           return send(res, 200, {
             rates: await quoteShipping(
               validateCustomer(data.customer),
-              catalog.resolveItems(data.items),
+              await catalog.resolveItems(data.items),
             ),
           });
         }
@@ -425,16 +422,17 @@ export async function createApp(options = {}) {
             throw httpError(400, "Escribe un correo electrónico válido.");
           const now = new Date().toISOString();
           // No enumeration, duplicate memberships or silent reactivation after an opt-out.
-          db.prepare(
+          await db.run(
             "INSERT OR IGNORE INTO vip_members(id,email,created_at,consent_at,privacy_url,consent_version,consent_text) VALUES(?,?,?,?,?,?,?)",
-          ).run(
-            randomUUID(),
-            email,
-            now,
-            now,
-            privacyUrl,
-            VIP_CONSENT_VERSION,
-            VIP_CONSENT_TEXT,
+            [
+              randomUUID(),
+              email,
+              now,
+              now,
+              privacyUrl,
+              VIP_CONSENT_VERSION,
+              VIP_CONSENT_TEXT,
+            ],
           );
           return send(res, 200, { ok: true });
         }
@@ -477,13 +475,13 @@ export async function createApp(options = {}) {
             !/^[a-f0-9-]{36}$/i.test(data.requestKey)
           )
             throw httpError(400, "Falta la referencia de la solicitud.");
-          const items = catalog.resolveItems(data.items),
+          const items = await catalog.resolveItems(data.items),
             customer = validateCustomer(data.customer);
-          const prior = db
-            .prepare("SELECT * FROM orders WHERE request_key=?")
-            .get(data.requestKey);
+          const prior = await db.get("SELECT * FROM orders WHERE request_key=?", [
+            data.requestKey,
+          ]);
           if (prior) {
-            const saved = summary(prior);
+            const saved = await summary(prior);
             if (
               JSON.stringify(saved.customer) !== JSON.stringify(customer) ||
               JSON.stringify(saved.items) !== JSON.stringify(items)
@@ -499,7 +497,7 @@ export async function createApp(options = {}) {
             });
           }
           const quote = shipping.enabled
-            ? chosenQuote(data.shippingQuoteId, customer, items)
+            ? await chosenQuote(data.shippingQuoteId, customer, items)
             : null;
           limit(
             "customer:" +
@@ -544,12 +542,22 @@ export async function createApp(options = {}) {
             consent: { at: now, privacyUrl, termsUrl },
           };
           // Order row and stock reservation commit together or not at all.
-          catalog.tx(() => {
-            db.prepare(
+          const duplicate = await catalog.tx(async (exec) => {
+            // A concurrent retry may arrive after the preliminary lookup.
+            const existing = await exec.get("SELECT payload FROM orders WHERE request_key=?", [data.requestKey]);
+            if (existing) {
+              const saved = JSON.parse(existing.payload);
+              if (JSON.stringify(saved.customer) !== JSON.stringify(customer) || JSON.stringify(saved.items) !== JSON.stringify(items))
+                throw httpError(409, "Ya existe una solicitud con esta referencia y otros datos.");
+              return saved;
+            }
+            await exec.run(
               "INSERT INTO orders(id,request_key,created_at,payload) VALUES(?,?,?,?)",
-            ).run(id, data.requestKey, now, JSON.stringify(order));
-            catalog.reserve(id, items);
+              [id, data.requestKey, now, JSON.stringify(order)],
+            );
+            await catalog.reserve(id, items, exec);
           });
+          if (duplicate) return send(res, 200, { id: duplicate.id, subtotalCents: duplicate.subtotalCents, status: duplicate.status });
           email.capture(order);
           return send(res, 201, {
             id,
@@ -561,7 +569,7 @@ export async function createApp(options = {}) {
           auth(req);
           if (route === "/api/admin/email-notifications" && req.method === "GET") {
             const orderId = new URL(req.url, origin).searchParams.get("orderId");
-            getOrder(orderId);
+            await getOrder(orderId);
             return send(res, 200, { ...email.status(), notifications: email.list(orderId) });
           }
           const emailRetry = route.match(/^\/api\/admin\/email-notifications\/([a-f0-9]{64})\/retry$/);
@@ -575,23 +583,25 @@ export async function createApp(options = {}) {
           if (route === "/api/admin/summary" && req.method === "GET") {
             limit("admin-summary:" + ip, 240, 60e3);
             return send(res, 200, {
-              ...catalog.summary(),
+              ...(await catalog.summary()),
               shipping: shippingConfig,
             });
           }
           if (route === "/api/admin/products" && req.method === "GET") {
             limit("admin-products:" + ip, 240, 60e3);
-            return send(res, 200, { products: catalog.listProducts() });
+            return send(res, 200, { products: await catalog.listProducts() });
           }
           if (route === "/api/admin/products" && req.method === "POST") {
             limit("admin-products-write:" + ip, 60, 60e3);
-            return send(res, 201, { product: catalog.createProduct(await body(req)) });
+            return send(res, 201, {
+              product: await catalog.createProduct(await body(req)),
+            });
           }
           const productMatch = route.match(/^\/api\/admin\/products\/([A-Za-z0-9-]{4,40})$/);
           if (productMatch && req.method === "PATCH") {
             limit("admin-products-write:" + ip, 60, 60e3);
             return send(res, 200, {
-              product: catalog.updateProduct(productMatch[1], await body(req)),
+              product: await catalog.updateProduct(productMatch[1], await body(req)),
             });
           }
           const productStatus = route.match(
@@ -601,12 +611,12 @@ export async function createApp(options = {}) {
             limit("admin-products-write:" + ip, 60, 60e3);
             const data = await body(req);
             return send(res, 200, {
-              product: catalog.setProductStatus(productStatus[1], data.status),
+              product: await catalog.setProductStatus(productStatus[1], data.status),
             });
           }
           if (route === "/api/admin/inventory" && req.method === "GET") {
             limit("admin-inventory:" + ip, 240, 60e3);
-            return send(res, 200, { variants: catalog.listInventory() });
+            return send(res, 200, { variants: await catalog.listInventory() });
           }
           const inventoryMatch = route.match(
             /^\/api\/admin\/inventory\/([A-Za-z0-9-]{4,40})(\/movements)?$/,
@@ -614,19 +624,19 @@ export async function createApp(options = {}) {
           if (inventoryMatch && req.method === "GET" && inventoryMatch[2]) {
             limit("admin-inventory:" + ip, 240, 60e3);
             return send(res, 200, {
-              movements: catalog.listMovements(inventoryMatch[1]),
+              movements: await catalog.listMovements(inventoryMatch[1]),
             });
           }
           if (inventoryMatch && req.method === "POST" && inventoryMatch[2]) {
             limit("admin-inventory-write:" + ip, 120, 60e3);
             return send(res, 201, {
-              variant: catalog.recordMovement(inventoryMatch[1], await body(req)),
+              variant: await catalog.recordMovement(inventoryMatch[1], await body(req)),
             });
           }
           if (inventoryMatch && req.method === "PATCH" && !inventoryMatch[2]) {
             limit("admin-inventory-write:" + ip, 120, 60e3);
             return send(res, 200, {
-              variant: catalog.updateInventorySettings(
+              variant: await catalog.updateInventorySettings(
                 inventoryMatch[1],
                 await body(req),
               ),
@@ -659,11 +669,9 @@ export async function createApp(options = {}) {
                 "La configuración cambió. Recarga antes de guardar.",
               );
             if (
-              db
-                .prepare(
-                  "SELECT 1 FROM shipping_jobs WHERE state='pending' LIMIT 1",
-                )
-                .get()
+              await db.get(
+                "SELECT 1 FROM shipping_jobs WHERE state='pending' LIMIT 1",
+              )
             )
               throw httpError(
                 409,
@@ -675,7 +683,7 @@ export async function createApp(options = {}) {
               passwordConfigured: !!passwordHash,
               fetcher: options.envia?.fetch,
             });
-            const saved = store.save(candidate, data.version);
+            const saved = await store.save(candidate, data.version);
             currentSettings = candidate;
             settingsVersion = saved.version;
             settingsUpdatedAt = saved.updatedAt;
@@ -689,7 +697,7 @@ export async function createApp(options = {}) {
             settingsFingerprint = createHash("sha256")
               .update(JSON.stringify(candidate))
               .digest("hex");
-            db.prepare("DELETE FROM shipping_quotes").run();
+            await db.run("DELETE FROM shipping_quotes");
             return send(res, 200, { ok: true, version: settingsVersion });
           }
           if (route === "/api/admin/password" && req.method === "PATCH") {
@@ -710,9 +718,10 @@ export async function createApp(options = {}) {
               );
             const nextSalt = randomBytes(32),
               nextHash = scryptSync(next, nextSalt, 64);
-            db.prepare(
+            await db.run(
               "INSERT INTO owner_auth(id,salt,hash,updated_at) VALUES(1,?,?,?) ON CONFLICT(id) DO UPDATE SET salt=excluded.salt,hash=excluded.hash,updated_at=excluded.updated_at",
-            ).run(nextSalt, nextHash, new Date().toISOString());
+              [nextSalt, nextHash, new Date().toISOString()],
+            );
             salt = nextSalt;
             passwordHash = nextHash;
             sessions.clear();
@@ -740,25 +749,33 @@ export async function createApp(options = {}) {
             });
           }
           if (route === "/api/admin/overview" && req.method === "GET") {
-            const rows = db
-              .prepare(
-                "SELECT json_extract(payload,'$.status') AS status,COUNT(*) AS count FROM orders GROUP BY json_extract(payload,'$.status')",
-              )
-              .all();
+            // Aggregate the confirmed order snapshots for the private overview.
+            const rows = await db.all("SELECT payload FROM orders");
             const counts = Object.fromEntries(
               Object.keys(labels).map((k) => [k, 0]),
             );
-            for (const row of rows) counts[row.status] = row.count;
-            const paid = db
-              .prepare(
-                "SELECT COUNT(*) AS count,COALESCE(SUM(json_extract(payload,'$.totalCents')),0) AS total FROM orders WHERE json_extract(payload,'$.status') IN ('paid','shipped','delivered')",
-              )
-              .get();
+            let total = 0,
+              paidCount = 0,
+              paidTotalCents = 0;
+            for (const row of rows) {
+              let value;
+              try {
+                value = JSON.parse(row.payload);
+              } catch {
+                continue;
+              }
+              total++;
+              if (Object.hasOwn(counts, value.status)) counts[value.status]++;
+              if (["paid", "shipped", "delivered"].includes(value.status)) {
+                paidCount++;
+                paidTotalCents += Number(value.totalCents) || 0;
+              }
+            }
             return send(res, 200, {
               counts,
-              total: rows.reduce((s, r) => s + r.count, 0),
-              paidCount: paid.count,
-              paidTotalCents: paid.total,
+              total,
+              paidCount,
+              paidTotalCents,
               enabled,
             });
           }
@@ -774,14 +791,15 @@ export async function createApp(options = {}) {
               url.searchParams.get("status") === "withdrawn"
                 ? "withdrawn"
                 : "active";
-            const members = db
-              .prepare(
-                "SELECT id,email,created_at,consent_at,privacy_url,consent_version,status,withdrawn_at FROM vip_members WHERE status=? ORDER BY created_at DESC LIMIT 51 OFFSET ?",
-              )
-              .all(status, page * 50);
-            const total = db
-              .prepare("SELECT COUNT(*) AS n FROM vip_members WHERE status=?")
-              .get(status).n;
+            const members = await db.all(
+              "SELECT id,email,created_at,consent_at,privacy_url,consent_version,status,withdrawn_at FROM vip_members WHERE status=? ORDER BY created_at DESC LIMIT 51 OFFSET ?",
+              [status, page * 50],
+            );
+            const total = (
+              await db.get("SELECT COUNT(*) AS n FROM vip_members WHERE status=?", [
+                status,
+              ])
+            ).n;
             return send(res, 200, {
               members: members.slice(0, 50),
               more: members.length > 50,
@@ -791,11 +809,6 @@ export async function createApp(options = {}) {
             });
           }
           if (route === "/api/admin/waitlist.csv" && req.method === "GET") {
-            const rows = db
-              .prepare(
-                "SELECT email,created_at,consent_at,privacy_url,consent_version FROM vip_members WHERE status='active' ORDER BY created_at DESC",
-              )
-              .iterate();
             const csv = (value) =>
               '"' +
               (/^[=+@\-\t\r]/.test(String(value)) ? "'" : "") +
@@ -809,31 +822,40 @@ export async function createApp(options = {}) {
             res.write(
               "\uFEFFemail,registered_at,consent_at,privacy_url,consent_version,email_verified\r\n",
             );
-            for (const row of rows) {
-              if (
-                !res.write(
-                  [
-                    row.email,
-                    row.created_at,
-                    row.consent_at,
-                    row.privacy_url,
-                    row.consent_version,
-                    "false",
-                  ]
-                    .map(csv)
-                    .join(",") + "\r\n",
+            // Paged reads instead of a driver cursor: LIMIT/OFFSET behaves the
+            // on SQLite and keeps memory bounded.
+            for (let offset = 0; !res.destroyed; offset += 200) {
+              const rows = await db.all(
+                "SELECT email,created_at,consent_at,privacy_url,consent_version FROM vip_members WHERE status='active' ORDER BY created_at DESC LIMIT 200 OFFSET ?",
+                [offset],
+              );
+              for (const row of rows) {
+                if (
+                  !res.write(
+                    [
+                      row.email,
+                      row.created_at,
+                      row.consent_at,
+                      row.privacy_url,
+                      row.consent_version,
+                      "false",
+                    ]
+                      .map(csv)
+                      .join(",") + "\r\n",
+                  )
                 )
-              )
-                await new Promise((resolve) => {
-                  const done = () => {
-                    res.off("drain", done);
-                    res.off("close", done);
-                    resolve();
-                  };
-                  res.once("drain", done);
-                  res.once("close", done);
-                });
-              if (res.destroyed) break;
+                  await new Promise((resolve) => {
+                    const done = () => {
+                      res.off("drain", done);
+                      res.off("close", done);
+                      resolve();
+                    };
+                    res.once("drain", done);
+                    res.once("close", done);
+                  });
+                if (res.destroyed) break;
+              }
+              if (rows.length < 200) break;
             }
             return res.end();
           }
@@ -844,13 +866,14 @@ export async function createApp(options = {}) {
             const data = await body(req);
             if (data.status !== "withdrawn")
               throw httpError(400, "Solo se permite dar de baja un registro.");
-            const row = db
-              .prepare("SELECT status FROM vip_members WHERE id=?")
-              .get(memberMatch[1]);
+            const row = await db.get("SELECT status FROM vip_members WHERE id=?", [
+              memberMatch[1],
+            ]);
             if (!row) throw httpError(404, "Registro no encontrado.");
-            db.prepare(
+            await db.run(
               "UPDATE vip_members SET status='withdrawn',withdrawn_at=COALESCE(withdrawn_at,?) WHERE id=?",
-            ).run(new Date().toISOString(), memberMatch[1]);
+              [new Date().toISOString(), memberMatch[1]],
+            );
             return send(res, 200, { ok: true });
           }
           if (route === "/api/admin/orders" && req.method === "GET") {
@@ -868,23 +891,12 @@ export async function createApp(options = {}) {
             const status = url.searchParams.get("status") ?? "";
             if (status && !Object.hasOwn(labels, status))
               throw httpError(400, "Revisa el estado del filtro.");
-            const condition =
-              "(?='' OR json_extract(payload,'$.status')=?) AND (?='' OR instr(lower(id || ' ' || json_extract(payload,'$.customer.name')),?)>0)";
+            const condition = "(?='' OR json_extract(payload,'$.status')=?) AND (?='' OR instr(lower(id || ' ' || json_extract(payload,'$.customer.name')),?)>0)";
             const params = [status, status, query, query];
-            const total = db
-              .prepare(
-                "SELECT COUNT(*) AS count FROM orders WHERE " + condition,
-              )
-              .get(...params).count;
-            const rows = db
-              .prepare(
-                "SELECT * FROM orders WHERE " +
-                  condition +
-                  " ORDER BY created_at DESC, id DESC LIMIT 51 OFFSET ?",
-              )
-              .all(...params, page * 50);
+            const total = (await db.get("SELECT COUNT(*) AS n FROM orders WHERE " + condition, params)).n;
+            const rows = await db.all("SELECT * FROM orders WHERE " + condition + " ORDER BY created_at DESC, id DESC LIMIT 51 OFFSET ?", [...params, page * 50]);
             return send(res, 200, {
-              orders: rows.slice(0, 50).map(summary),
+              orders: await Promise.all(rows.slice(0, 50).map(summary)),
               more: rows.length > 50,
               page,
               total,
@@ -897,7 +909,7 @@ export async function createApp(options = {}) {
             /^\/api\/admin\/orders\/(OF-[A-F0-9]{12})\/(shipping-rates|label|label-reconcile)$/,
           );
           if (shippingMatch && req.method === "POST") {
-            const order = getOrder(shippingMatch[1]),
+            const order = await getOrder(shippingMatch[1]),
               action = shippingMatch[2],
               data = await body(req);
             if (action === "label" && order.labelJob?.state === "generated")
@@ -923,18 +935,16 @@ export async function createApp(options = {}) {
                   status: order.status,
                   note: "El propietario verificó en Envia que el intento no creó guía ni cargo pendiente; habilitó una nueva compra.",
                 });
-                db.exec("BEGIN IMMEDIATE");
-                try {
-                  saveOrder(order);
-                  db.prepare(
+                // Order payload and shipping job move together: either the
+                // owner can buy again, or the lock stays exactly as it was.
+                await catalog.tx(async (exec) => {
+                  await persistOrder(order, exec);
+                  await exec.run(
                     "DELETE FROM shipping_jobs WHERE order_id=? AND state='uncertain'",
-                  ).run(order.id);
-                  db.exec("COMMIT");
-                } catch (e) {
-                  db.exec("ROLLBACK");
-                  throw e;
-                }
-                return send(res, 200, { order: getOrder(order.id) });
+                    [order.id],
+                  );
+                });
+                return send(res, 200, { order: await getOrder(order.id) });
               }
               const result = {
                 shipmentId: clean(
@@ -953,15 +963,16 @@ export async function createApp(options = {}) {
                   400,
                   "La guía debe ser un enlace HTTPS válido.",
                 );
-              const priorJob = JSON.parse(
-                db
-                  .prepare("SELECT payload FROM shipping_jobs WHERE order_id=?")
-                  .get(order.id).payload,
+              const priorJobRow = await db.get(
+                "SELECT payload FROM shipping_jobs WHERE order_id=?",
+                [order.id],
               );
-              db.prepare(
+              const priorJob = priorJobRow ? JSON.parse(priorJobRow.payload) : {};
+              await db.run(
                 "UPDATE shipping_jobs SET state='generated',payload=? WHERE order_id=? AND state='uncertain'",
-              ).run(JSON.stringify({ ...priorJob, result }), order.id);
-              return send(res, 200, { order: getOrder(order.id) });
+                [JSON.stringify({ ...priorJob, result }), order.id],
+              );
+              return send(res, 200, { order: await getOrder(order.id) });
             }
             if (!shipping.enabled)
               throw httpError(
@@ -997,7 +1008,7 @@ export async function createApp(options = {}) {
                 400,
                 "Confirma la compra de la guía y su cargo en Envia.",
               );
-            const quote = chosenQuote(
+            const quote = await chosenQuote(
               data.quoteId,
               order.customer,
               order.items,
@@ -1019,11 +1030,10 @@ export async function createApp(options = {}) {
               quote,
             };
             // Durable lock precedes the charge. Timeouts/crashes never trigger an automatic retry.
-            const lock = db
-              .prepare(
-                "INSERT OR IGNORE INTO shipping_jobs(order_id,state,payload) VALUES(?,'pending',?)",
-              )
-              .run(order.id, JSON.stringify(job));
+            const lock = await db.run(
+              "INSERT OR IGNORE INTO shipping_jobs(order_id,state,payload) VALUES(?,'pending',?)",
+              [order.id, JSON.stringify(job)],
+            );
             if (!lock.changes)
               throw httpError(
                 409,
@@ -1035,14 +1045,16 @@ export async function createApp(options = {}) {
                 quote.rate,
                 order.id,
               );
-              db.prepare(
+              await db.run(
                 "UPDATE shipping_jobs SET state='generated',payload=? WHERE order_id=?",
-              ).run(JSON.stringify({ ...job, result }), order.id);
-              return send(res, 201, { order: getOrder(order.id) });
+                [JSON.stringify({ ...job, result }), order.id],
+              );
+              return send(res, 201, { order: await getOrder(order.id) });
             } catch {
-              db.prepare(
+              await db.run(
                 "UPDATE shipping_jobs SET state='uncertain' WHERE order_id=?",
-              ).run(order.id);
+                [order.id],
+              );
               throw httpError(
                 502,
                 "No se pudo confirmar la guía. Revisa este pedido en Envia antes de continuar; se bloqueó la recompra para evitar cargos duplicados.",
@@ -1054,7 +1066,7 @@ export async function createApp(options = {}) {
           );
           if (match && req.method === "PATCH") {
             const change = await body(req),
-              order = getOrder(match[1]);
+              order = await getOrder(match[1]);
             if (change.version !== order.version)
               throw httpError(
                 409,
@@ -1085,7 +1097,7 @@ export async function createApp(options = {}) {
                 throw httpError(400, "Confirma antes la disponibilidad real.");
               if (shipping.enabled) {
                 if (change.quoteId) {
-                  const q = chosenQuote(
+                  const q = await chosenQuote(
                     change.quoteId,
                     order.customer,
                     order.items,
@@ -1165,13 +1177,13 @@ export async function createApp(options = {}) {
             order.history.push({ at: order.updatedAt, status: order.status });
             // Stock and order status move together: a failed write never leaves
             // the inventory discounted without the matching status.
-            const value = catalog.tx(() => {
-              if (change.status === "paid") catalog.sell(order.id);
-              if (change.status === "cancelled") catalog.release(order.id);
-              return persistOrder(order);
+            const value = await catalog.tx(async (exec) => {
+              if (change.status === "paid") await catalog.sell(order.id, exec);
+              if (change.status === "cancelled") await catalog.release(order.id, exec);
+              return persistOrder(order, exec);
             });
             email.capture(value);
-            return send(res, 200, { order: getOrder(order.id) });
+            return send(res, 200, { order: await getOrder(order.id) });
           }
         }
         throw httpError(404, "Ruta no encontrada.");
@@ -1263,12 +1275,13 @@ export async function createApp(options = {}) {
   return {
     server,
     email,
+    db,
     close: async () => {
       await email.close();
       return new Promise((resolve) => {
         clearInterval(quoteCleanup);
-        server.close(() => {
-          db.close();
+        server.close(async () => {
+          await db.close().catch(() => {});
           resolve();
         });
         server.closeAllConnections();
@@ -1280,13 +1293,23 @@ if (
   process.argv[1] &&
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  const app = await createApp();
+  let app;
+  try {
+    app = await createApp();
+  } catch (error) {
+    // Never keep serving with a database that was not configured correctly.
+    console.error(`OFFCODE no pudo iniciar: ${error.message}`);
+    process.exit(1);
+  }
   const port = Number(process.env.PORT ?? 8000);
-  app.server.listen(port, process.env.HOST ?? "127.0.0.1", () =>
+  const host = process.env.HOST ?? "127.0.0.1";
+  app.server.listen(port, host, () => {
+    const info = app.db.describe();
+    const target = `sqlite ${info.path}`;
     console.log(
-      `OFFCODE: ${process.env.PUBLIC_ORIGIN ?? process.env.RENDER_EXTERNAL_URL ?? "http://localhost:" + port} · operación en /admin.html · configuración en /settings.html`,
-    ),
-  );
+      `OFFCODE: ${process.env.PUBLIC_ORIGIN ?? process.env.RENDER_EXTERNAL_URL ?? "http://localhost:" + port} · datos en ${target} · operación en /admin.html · configuración en /settings.html`,
+    );
+  });
   for (const signal of ["SIGTERM", "SIGINT"])
     process.on(signal, async () => {
       await app.close();

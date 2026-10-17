@@ -6,6 +6,7 @@ if (process.env.NODE_ENV === "production")
 const app = await createApp({
   origin: "http://127.0.0.1:8013",
   production: false,
+  email: { env: {}, autoStart: false, logger: () => {} },
   databasePath: ":memory:",
   settingsKey: randomBytes(32).toString("hex"),
   password: "solo-pruebas-fedex-ficticias",

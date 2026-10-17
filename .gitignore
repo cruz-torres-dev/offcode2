@@ -12,3 +12,7 @@ offcode-vip*.csv
 .workbuddy-ai/
 # Exported DNS zone of the domain: infrastructure data, not application code.
 *.zone
+
+# Deployment archives and confidential source material are local only.
+*.zip
+*[Tt][Ee][Cc][Hh]*[Pp][Aa][Cc][Kk]*
