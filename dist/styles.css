@@ -1,7 +1,17 @@
 :root {
+  color-scheme: dark;
+  --bg: #080808;
+  --bg-2: #111111;
+  --surface: #181818;
+  --text: #f5f5f5;
+  --muted: #a6a6a6;
+  --line: #303030;
+  /* Control outlines need ~3:1 against --bg; --line is for structure only. */
+  --line-strong: #5f5f5f;
+  /* Light surfaces: product photography and primary buttons. */
   --paper: #fafafa;
-  --ink: #161616;
-  --line: #d9d9d9;
+  --ink: #111111;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 * {
   box-sizing: border-box;
@@ -9,11 +19,12 @@
 html {
   scroll-behavior: smooth;
   scroll-padding-top: 145px;
+  background: var(--bg);
 }
 body {
   margin: 0;
-  background: var(--paper);
-  color: var(--ink);
+  background: var(--bg);
+  color: var(--text);
   font-family: Arial, Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -41,7 +52,7 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 summary:focus-visible {
-  outline: 2px solid #777;
+  outline: 2px solid #d4d4d4;
   outline-offset: 5px;
 }
 img {
@@ -52,7 +63,8 @@ img {
   top: -100px;
   left: 15px;
   z-index: 100;
-  background: white;
+  background: var(--paper);
+  color: var(--ink);
   padding: 15px;
 }
 .skip-link:focus {
@@ -60,8 +72,9 @@ img {
 }
 .notice {
   text-align: center;
-  background: #141414;
-  color: #e7e7e7;
+  background: #000;
+  color: var(--muted);
+  border-bottom: 1px solid #1c1c1c;
   font-size: 9px;
   letter-spacing: 2px;
   padding: 10px 12px;
@@ -71,8 +84,9 @@ header {
   top: 0;
   z-index: 20;
   height: 130px;
-  background: #fafafaf5;
-  backdrop-filter: blur(12px);
+  background: rgb(8 8 8 / 0.84);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  backdrop-filter: blur(14px) saturate(120%);
   border-bottom: 1px solid var(--line);
   display: grid;
   grid-template-columns: 1fr 210px 1fr;
@@ -85,10 +99,34 @@ nav {
   font-size: 11px;
 }
 nav a {
+  position: relative;
   padding: 15px 0;
+  color: #d9d9d9;
+  transition: color 0.3s var(--ease);
 }
-nav a:hover {
-  opacity: 0.55;
+nav a::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10px;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform 0.45s var(--ease);
+}
+@media (hover: hover) {
+  nav a:hover {
+    color: #fff;
+  }
+  nav a:hover::after {
+    transform: scaleX(1);
+    transform-origin: left;
+  }
+}
+nav a:focus-visible::after {
+  transform: scaleX(1);
 }
 .brand {
   align-self: stretch;
@@ -109,6 +147,8 @@ nav a:hover {
   height: 100%;
   object-fit: contain;
   padding: 12px 25px;
+  /* The supplied mark is dark graphite; invert it for the black header. */
+  filter: invert(1) brightness(0.92);
 }
 model-viewer {
   position: absolute;
@@ -137,10 +177,11 @@ model-viewer {
   bottom: 6px;
   font-size: 8px;
   letter-spacing: 1px;
-  color: #666;
+  color: var(--muted);
   min-height: 28px;
   min-width: 112px;
   padding: 6px 12px;
+  transition: color 0.3s var(--ease);
 }
 #motion[hidden] {
   display: none;
@@ -151,6 +192,21 @@ model-viewer {
   min-height: 44px;
   font-size: 11px;
   padding: 12px 0 12px 20px;
+  color: #d9d9d9;
+  transition: color 0.3s var(--ease);
+}
+#bag #count {
+  display: inline-block;
+  transition: transform 0.35s var(--ease);
+}
+@media (hover: hover) {
+  #bag:hover,
+  #motion:hover {
+    color: #fff;
+  }
+  #bag:hover #count {
+    transform: translateX(2px);
+  }
 }
 #menu-toggle {
   display: none;
@@ -159,8 +215,8 @@ model-viewer {
   height: min(780px, calc(100svh - 161px));
   min-height: 540px;
   position: relative;
-  background: #252525;
-  color: white;
+  background: var(--bg);
+  color: #fff;
   overflow: hidden;
 }
 .hero-images {
@@ -188,7 +244,9 @@ model-viewer {
 .hero-shade {
   position: absolute;
   inset: 0;
-  background: linear-gradient(0deg, #000a, transparent 55%);
+  background:
+    linear-gradient(0deg, rgb(8 8 8 / 0.78), transparent 58%),
+    linear-gradient(180deg, rgb(8 8 8 / 0.42), transparent 22%);
 }
 .hero-top,
 .hero-bottom {
@@ -240,33 +298,58 @@ model-viewer {
   gap: 26px;
   font-size: 11px;
   border: 1px solid transparent;
+  transition:
+    background-color 0.35s var(--ease),
+    border-color 0.35s var(--ease),
+    color 0.35s var(--ease),
+    transform 0.35s var(--ease);
+}
+.button span {
+  display: inline-block;
+  transition: transform 0.4s var(--ease);
+}
+/* Both variants are light on the dark theme; "dark" is kept as a class name
+   because the markup and scripts still reference it. */
+.light,
+.dark {
+  background: var(--text);
+  color: var(--ink);
+  border-color: var(--text);
 }
 .light {
-  background: #fafafa;
-  color: #111;
   width: 255px;
 }
-.light:hover {
-  background: #ddd;
-}
 .dark {
-  background: #171717;
-  color: #fff;
   width: 100%;
 }
-.dark:hover {
-  background: #383838;
+@media (hover: hover) {
+  .light:hover,
+  .dark:not(:disabled):hover {
+    background: #d6d6d6;
+    border-color: #d6d6d6;
+    transform: translateY(-1px);
+  }
+  .button:not(:disabled):hover span {
+    transform: translateX(3px);
+  }
+}
+.button:not(:disabled):active {
+  transform: translateY(0);
+  background: #c4c4c4;
 }
 .collection-strip {
   display: flex;
   justify-content: space-between;
   padding: 23px 4%;
+  background: var(--bg-2);
   border-bottom: 1px solid var(--line);
+  color: var(--muted);
   font-size: 9px;
   letter-spacing: 1.5px;
 }
 .collection {
   padding: 95px 7% 105px;
+  background: var(--bg);
 }
 .section-heading {
   display: flex;
@@ -290,7 +373,7 @@ h2 {
   line-height: 1.9;
 }
 .section-heading > p span {
-  color: #777;
+  color: var(--muted);
 }
 .product-grid {
   display: grid;
@@ -306,7 +389,9 @@ h2 {
   width: 100%;
   padding: 0;
   aspect-ratio: 1;
+  /* Product photography is shot on white: keep the surface light. */
   background: #fff;
+  color: var(--ink);
   overflow: hidden;
 }
 .product-image img {
@@ -316,17 +401,30 @@ h2 {
   display: block;
   transition: transform 0.5s;
 }
-.product-image:hover img {
-  transform: scale(1.035);
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .product-image:hover img {
+    transform: scale(1.035);
+  }
 }
 .product-image > span {
   position: absolute;
   bottom: 20px;
   left: 20px;
+  z-index: 2;
   background: #fffd;
+  color: var(--ink);
   padding: 8px;
   font-size: 8px;
   letter-spacing: 1.2px;
+  transition:
+    background-color 0.3s var(--ease),
+    color 0.3s var(--ease);
+}
+@media (hover: hover) {
+  .product-image:hover > span {
+    background: var(--ink);
+    color: var(--text);
+  }
 }
 .gallery-controls {
   display: flex;
@@ -335,11 +433,16 @@ h2 {
   padding: 12px 0;
   font-size: 9px;
   letter-spacing: 1px;
+  color: var(--muted);
 }
 .gallery-controls button {
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   width: 44px;
   height: 44px;
+  color: var(--text);
+  transition:
+    background-color 0.3s var(--ease),
+    border-color 0.3s var(--ease);
 }
 .gallery-thumbs {
   display: grid;
@@ -349,10 +452,28 @@ h2 {
 .gallery-thumbs button {
   border: 1px solid var(--line);
   padding: 5px;
+  color: var(--muted);
+  transition:
+    border-color 0.3s var(--ease),
+    color 0.3s var(--ease),
+    transform 0.35s var(--ease);
 }
 .gallery-thumbs button.active {
-  border-color: #111;
-  box-shadow: inset 0 0 0 1px #111;
+  border-color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--text);
+  color: var(--text);
+}
+@media (hover: hover) {
+  .gallery-controls button:hover,
+  .cart-row button:hover {
+    background: var(--surface);
+    border-color: #8a8a8a;
+  }
+  .gallery-thumbs button:not(.active):hover {
+    border-color: #8a8a8a;
+    color: var(--text);
+    transform: translateY(-2px);
+  }
 }
 .gallery-thumbs img {
   display: block;
@@ -387,17 +508,17 @@ h2 {
 }
 .price del {
   font-size: 12px;
-  color: #777;
+  color: var(--muted);
 }
 .demo-note {
   font-size: 10px;
   line-height: 1.8;
-  color: #666;
+  color: var(--muted);
 }
 .description {
   font-size: 12px;
   line-height: 1.9;
-  color: #555;
+  color: #bdbdbd;
   margin: 27px 0;
   max-width: 430px;
 }
@@ -411,7 +532,7 @@ legend {
   margin-bottom: 12px;
 }
 legend span {
-  color: #777;
+  color: var(--muted);
 }
 .sizes {
   display: flex;
@@ -420,12 +541,28 @@ legend span {
 .sizes button {
   width: 56px;
   height: 46px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
+  color: #d9d9d9;
+  transition:
+    background-color 0.3s var(--ease),
+    border-color 0.3s var(--ease),
+    color 0.3s var(--ease),
+    transform 0.2s var(--ease);
+}
+@media (hover: hover) {
+  .sizes button:not(.selected):hover {
+    border-color: var(--text);
+    color: #fff;
+  }
+}
+.sizes button:active {
+  transform: scale(0.96);
 }
 .sizes button.selected {
-  background: #171717;
-  color: white;
-  border-color: #171717;
+  background: var(--text);
+  color: var(--ink);
+  border-color: var(--text);
+  font-weight: 600;
 }
 .quantity {
   display: flex;
@@ -436,18 +573,25 @@ legend span {
 }
 .quantity > div {
   display: flex;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
 }
 .quantity button {
   width: 44px;
   height: 44px;
+  transition: background-color 0.3s var(--ease);
+}
+@media (hover: hover) {
+  .quantity button:hover {
+    background: var(--surface);
+  }
 }
 .quantity input {
   width: 44px;
   text-align: center;
   background: none;
+  color: var(--text);
   border: 0;
-  border-inline: 1px solid var(--line);
+  border-inline: 1px solid var(--line-strong);
   appearance: textfield;
 }
 .quantity input::-webkit-inner-spin-button {
@@ -462,14 +606,25 @@ summary {
   display: flex;
   justify-content: space-between;
   cursor: pointer;
+  list-style: none;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+summary span {
+  transition: transform 0.35s var(--ease);
+}
+details[open] summary span {
+  transform: rotate(45deg);
 }
 details p {
   line-height: 1.9;
-  color: #666;
+  color: var(--muted);
 }
 .editorial {
-  background: #171717;
-  color: #f4f4f4;
+  background: var(--bg-2);
+  color: var(--text);
+  border-top: 1px solid var(--line);
   padding: 80px 5% 85px;
 }
 .editorial-heading {
@@ -484,7 +639,7 @@ details p {
   margin: 18px 0 0;
 }
 .editorial-heading > p {
-  color: #aaa;
+  color: var(--muted);
 }
 .editorial-grid {
   display: grid;
@@ -508,7 +663,7 @@ figure {
   aspect-ratio: 3/4;
   object-fit: cover;
   display: block;
-  background: #222;
+  background: var(--surface);
 }
 figcaption {
   display: flex;
@@ -517,11 +672,11 @@ figcaption {
   font-size: 8px;
   letter-spacing: 1px;
   padding-top: 18px;
-  color: #bbb;
+  color: var(--muted);
   line-height: 1.8;
 }
 figcaption button {
-  color: #eee;
+  color: var(--text);
   font-size: 9px;
   letter-spacing: 0;
   text-decoration: underline;
@@ -532,6 +687,11 @@ figcaption button {
 .closing {
   text-align: center;
   padding: 85px 20px;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+.closing .eyebrow {
+  color: var(--muted);
 }
 .closing h2 {
   font-size: clamp(56px, 12vw, 175px);
@@ -541,10 +701,23 @@ figcaption button {
 }
 .closing > a {
   font-size: 12px;
-  border-bottom: 1px solid;
+  border-bottom: 1px solid var(--line-strong);
   padding-bottom: 7px;
+  transition:
+    border-color 0.35s var(--ease),
+    color 0.35s var(--ease);
+}
+@media (hover: hover) {
+  .closing > a:hover {
+    border-color: var(--text);
+  }
+  footer a:hover {
+    color: #fff;
+  }
 }
 footer {
+  background: var(--bg);
+  color: #d9d9d9;
   border-top: 1px solid var(--line);
   display: flex;
   justify-content: space-between;
@@ -565,6 +738,12 @@ footer p,
 footer > a:last-child {
   font-size: 9px;
 }
+footer p {
+  color: var(--muted);
+}
+footer a {
+  transition: color 0.3s var(--ease);
+}
 .footer-links {
   display: flex;
   flex-wrap: wrap;
@@ -572,15 +751,53 @@ footer > a:last-child {
   font-size: 11px;
 }
 dialog {
-  border: 0;
-  background: #fafafa;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text);
   padding: 28px;
   width: min(540px, 92vw);
   max-height: 90svh;
+  box-shadow: 0 30px 80px rgb(0 0 0 / 0.6);
 }
 dialog::backdrop {
-  background: #000a;
+  background: rgb(0 0 0 / 0.72);
   backdrop-filter: blur(5px);
+}
+/* Progressive enhancement: browsers without @starting-style or discrete
+   transitions simply open and close the dialog instantly. */
+@media (prefers-reduced-motion: no-preference) {
+  dialog {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+    transition:
+      opacity 0.3s var(--ease),
+      transform 0.4s var(--ease),
+      overlay 0.4s allow-discrete,
+      display 0.4s allow-discrete;
+  }
+  dialog[open] {
+    opacity: 1;
+    transform: none;
+  }
+  dialog::backdrop {
+    opacity: 0;
+    transition:
+      opacity 0.3s var(--ease),
+      overlay 0.4s allow-discrete,
+      display 0.4s allow-discrete;
+  }
+  dialog[open]::backdrop {
+    opacity: 1;
+  }
+  @starting-style {
+    dialog[open] {
+      opacity: 0;
+      transform: translateY(14px) scale(0.985);
+    }
+    dialog[open]::backdrop {
+      opacity: 0;
+    }
+  }
 }
 body:has(dialog[open]) {
   overflow: hidden;
@@ -598,6 +815,20 @@ body:has(dialog[open]) {
   width: 44px;
   height: 44px;
   flex-shrink: 0;
+  border: 1px solid transparent;
+  transition:
+    border-color 0.3s var(--ease),
+    transform 0.4s var(--ease);
+}
+@media (hover: hover) {
+  .close:hover {
+    border-color: var(--line-strong);
+    transform: rotate(90deg);
+  }
+}
+#cart-items > p {
+  font-size: 12px;
+  color: var(--muted);
 }
 .cart-row {
   border-top: 1px solid var(--line);
@@ -612,9 +843,12 @@ body:has(dialog[open]) {
   line-height: 1.8;
 }
 .cart-row button {
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   min-height: 44px;
   padding: 10px;
+  transition:
+    background-color 0.3s var(--ease),
+    border-color 0.3s var(--ease);
 }
 .cart-total {
   border-top: 1px solid var(--line);
@@ -637,6 +871,7 @@ body:has(dialog[open]) {
   max-height: 72svh;
   object-fit: contain;
   display: block;
+  background: #fff;
 }
 #toast {
   position: fixed;
@@ -646,13 +881,17 @@ body:has(dialog[open]) {
   max-width: 90vw;
   transform: translate(-50%, 20px);
   padding: 18px 24px;
-  background: #fff;
-  box-shadow: 0 3px 30px #0003;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.55);
   font-size: 11px;
   z-index: 60;
   opacity: 0;
   pointer-events: none;
-  transition: 0.2s;
+  transition:
+    opacity 0.3s var(--ease),
+    transform 0.4s var(--ease);
 }
 #toast.visible {
   opacity: 1;
@@ -701,7 +940,7 @@ body:has(dialog[open]) {
     left: 0;
     right: 0;
     top: 100%;
-    background: #fafafa;
+    background: rgb(8 8 8 / 0.97);
     padding: 20px 6% 25px;
     border-bottom: 1px solid var(--line);
     font-size: 14px;
@@ -830,7 +1069,7 @@ body:has(dialog[open]) {
     min-width: 150px;
     font-size: 11px;
     padding: 10px 14px;
-    border: 1px solid #777;
+    border: 1px solid var(--line-strong);
     text-decoration: none;
   }
   .video-figure figcaption {

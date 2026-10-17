@@ -1,0 +1,36 @@
+/* Motion enhances the existing layout; nothing is hidden without JavaScript. */
+.hero-images picture {
+  overflow: hidden;
+}
+.hero-shade {
+  pointer-events: none;
+}
+/* Outgoing gallery photo, created by motion.js only while it fades out.
+   The white fill hides the incoming photo until it has decoded. */
+.product-image .gallery-ghost {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: #fff;
+  pointer-events: none;
+}
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .campaign-depth img {
+    transform: translate3d(var(--depth-x, 0px), var(--depth-y, 0px), 0)
+      scale(var(--depth-scale, 1));
+    transition: transform 650ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .product-tilt img,
+  .product-tilt:hover img {
+    transform: perspective(1200px) rotateX(var(--tilt-x, 0deg))
+      rotateY(var(--tilt-y, 0deg)) scale(var(--tilt-scale, 1));
+    transition: transform 450ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .campaign-depth img,
+  .product-tilt img,
+  .product-image:hover img {
+    transform: none !important;
+  }
+}
