@@ -7,6 +7,41 @@ const digest = (value) => createHash("sha256").update(value).digest("hex");
 const secret = () => randomBytes(32).toString("base64url");
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const generic = "Si la dirección permite esta operación, se intentará enviar un enlace. La entrega no está confirmada; revisa también spam.";
+const genericEmailChange = "Si esa dirección puede usarse, enviaremos un enlace de confirmación. La entrega no está confirmada; revisa también spam.";
+const MARKETING_VERSION = "commercial-v1";
+const MARKETING_TEXT =
+  "Quiero recibir novedades, lanzamientos y avisos comerciales de OFFCODE por correo. Entiendo que puedo retirar este consentimiento cuando quiera desde mi cuenta.";
+
+// Order states are derived only from what the owner actually persisted. There is
+// no synthetic fallback: an unknown state stays unknown and is shown as such.
+const ORDER_LABELS = Object.freeze({
+  requested: "Por confirmar",
+  awaiting_transfer: "Pendiente de transferencia",
+  paid: "Pago verificado",
+  shipped: "Enviado",
+  delivered: "Entregado",
+  cancelled: "Cancelado",
+});
+const ORDER_STATE = Object.freeze({
+  requested: ["pending", "pending"],
+  awaiting_transfer: ["pending", "pending"],
+  paid: ["paid", "preparing"],
+  shipped: ["paid", "shipped"],
+  delivered: ["paid", "delivered"],
+  cancelled: ["cancelled", "cancelled"],
+});
+const PAYMENT_LABELS = Object.freeze({ pending: "Pago pendiente", paid: "Pagado", cancelled: "Cancelado", unknown: "Sin estado de pago" });
+const SHIPPING_LABELS = Object.freeze({
+  pending: "Envío por confirmar",
+  preparing: "En preparación",
+  shipped: "Enviado",
+  delivered: "Entregado",
+  cancelled: "Cancelado",
+  unknown: "Sin estado de envío",
+});
+const money = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+const text = (value) => (typeof value === "string" ? value.trim() : "");
+
 export function normalizeCustomerEmail(value) {
   const email = typeof value === "string" ? value.trim().toLowerCase() : "";
   const [local, domain] = email.split("@");
@@ -90,6 +125,111 @@ export function createCustomerAccounts({ db, origin, production, body, send, lim
       return fn(tx, token.customer_id);
     });
   }
+
+  // ---- Addresses -----------------------------------------------------------
+  const addressOf = (row) => ({
+    id: row.id,
+    label: row.label,
+    name: row.name,
+    phone: row.phone,
+    street: row.street,
+    number: row.number,
+    neighborhood: row.neighborhood,
+    city: row.city,
+    state: row.state,
+    postalCode: row.postal_code,
+    notes: row.notes,
+    isDefault: !!row.is_default,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+  // Server-side validation reuses the checkout validator, so a saved address
+  // can never hold a value the checkout would reject. The account email is
+  // always taken from the session, never from the request body.
+  function addressInput(data, user) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw fail(400, "Revisa la dirección de envío.");
+    const label = text(data.label);
+    if (label.length > 40 || /[\u0000-\u001f]/.test(label)) throw fail(400, "La etiqueta debe tener 40 caracteres como máximo.");
+    const value = validateCustomer({ ...data, email: user.email });
+    return { label, value };
+  }
+  async function defaultAddress(userId, exec = db) {
+    const row = await exec.get("SELECT * FROM customer_addresses WHERE customer_id=? AND is_default=1 LIMIT 1", [userId]);
+    return row ? addressOf(row) : null;
+  }
+  async function ensureDefault(tx, userId) {
+    const row = await tx.get("SELECT id FROM customer_addresses WHERE customer_id=? AND is_default=1", [userId]);
+    if (row) return;
+    const next = await tx.get("SELECT id FROM customer_addresses WHERE customer_id=? ORDER BY created_at, rowid LIMIT 1", [userId]);
+    if (next) await tx.run("UPDATE customer_addresses SET is_default=1 WHERE id=?", [next.id]);
+  }
+
+  // ---- Orders --------------------------------------------------------------
+  function customerOrder(order, detail = false) {
+    const [payment, shipping] = ORDER_STATE[order.status] ?? ["unknown", "unknown"];
+    const carrier = text(order.carrier), tracking = text(order.tracking);
+    const result = {
+      id: order.id,
+      createdAt: order.createdAt,
+      status: order.status,
+      statusLabel: ORDER_LABELS[order.status] ?? order.status,
+      payment: { status: payment, label: PAYMENT_LABELS[payment] },
+      shipping: {
+        status: shipping,
+        label: SHIPPING_LABELS[shipping],
+        carrier,
+        // Tracking is only exposed when the owner actually recorded it.
+        tracking,
+        trackingUrl: carrier.toLowerCase() === "fedex" && /^[A-Za-z0-9]{4,40}$/.test(tracking)
+          ? `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(tracking)}`
+          : "",
+        service: text(order.shipping?.service),
+        description: text(order.shipping?.description),
+        estimate: text(order.shipping?.deliveryEstimate),
+      },
+      items: (Array.isArray(order.items) ? order.items : []).map((item) => ({
+        name: text(item?.name),
+        color: text(item?.color),
+        size: text(item?.size),
+        qty: Number.isSafeInteger(item?.qty) ? item.qty : 0,
+        unitCents: money(item?.unitCents),
+      })),
+      subtotalCents: money(order.subtotalCents),
+      shippingCents: money(order.shippingCents),
+      totalCents: money(order.totalCents),
+      currency: "MXN",
+    };
+    if (detail) {
+      const c = order.customer ?? {};
+      result.address = {
+        name: text(c.name), phone: text(c.phone), street: text(c.street), number: text(c.number),
+        neighborhood: text(c.neighborhood), city: text(c.city), state: text(c.state),
+        postalCode: text(c.postalCode), notes: text(c.notes),
+      };
+      // Only real recorded transitions; internal owner notes stay private.
+      result.history = (Array.isArray(order.history) ? order.history : [])
+        .filter((entry) => entry && typeof entry.status === "string")
+        .map((entry) => ({ at: entry.at, status: entry.status, label: ORDER_LABELS[entry.status] ?? entry.status }));
+    }
+    return result;
+  }
+
+  async function sendEmailChange(user, newEmail) {
+    const token = secret();
+    const at = new Date(now()).toISOString();
+    await db.tx(async (tx) => {
+      await tx.run("DELETE FROM customer_email_changes WHERE customer_id=? OR expires<=?", [user.id, now()]);
+      await tx.run("INSERT INTO customer_email_changes(token_hash,customer_id,new_email,expires,created_at) VALUES(?,?,?,?,?)",
+        [digest(token), user.id, newEmail, now() + 3600e3, at]);
+    });
+    const url = `${origin}/cuenta.html#email=${token}`;
+    const text = `OFFCODE · Confirma tu nueva dirección\n\n${url}\n\nEste enlace es de un solo uso y vence en 60 minutos. Tu correo actual sigue activo hasta que lo confirmes. Si no lo solicitaste, ignóralo.`;
+    const result = await mail.send({ from: mail.from, to: [newEmail], subject: "OFFCODE · Confirma tu nueva dirección", text,
+      html: `<html lang="es"><body style="background:#080808;color:#f5f5f5;font-family:Arial;padding:32px"><h1>OFFCODE</h1><h2>Confirma tu nueva dirección</h2><p><a style="color:#fff" href="${escapeHtml(url)}">Confirmar esta dirección</a></p><p>Enlace de un solo uso. Vence en 60 minutos. Tu correo actual sigue activo hasta que lo confirmes.</p></body></html>` }, `email-change/${digest(token)}`);
+    try { logger(JSON.stringify({ component: "customer_email", state: result.state, code: result.code })); } catch {}
+    if (result.state !== "accepted") throw fail(503, "No pudimos confirmar el envío del correo. Intenta solicitar otro enlace más tarde.");
+  }
+
   async function handle(req, res, url, ip) {
     const route = url.pathname, method = req.method;
     if (!route.startsWith("/api/customer/") && route !== "/api/contact") return false;
@@ -156,24 +296,196 @@ export function createCustomerAccounts({ db, origin, production, body, send, lim
       });
       cookie(res, cookieName, "", 0); send(res, 200, { message: "Contraseña actualizada. Inicia sesión de nuevo." }); return true;
     }
+
+    // ---- Profile ---------------------------------------------------------
     if (route === "/api/customer/profile" && ["GET", "PATCH"].includes(method)) {
       const user = await requireUser(req);
       if (method === "PATCH") {
         const data = await body(req);
         if (typeof data.name !== "string" || data.name.trim().length < 3 || data.name.length > 100 || /[\x00-\x1f]/.test(data.name)) throw fail(400, "Escribe tu nombre (3–100 caracteres).");
-        const address = data.address ? validateCustomer({ ...data.address, name: data.name, email: user.email }) : null;
-        await db.run("UPDATE customers SET name=?,address=? WHERE id=?", [data.name.trim(), address ? JSON.stringify(address) : null, user.id]);
+        await db.run("UPDATE customers SET name=? WHERE id=?", [data.name.trim(), user.id]);
       }
       const fresh = await db.get("SELECT * FROM customers WHERE id=?", [user.id]);
-      send(res, 200, { user: publicUser(fresh), address: fresh.address ? JSON.parse(fresh.address) : null }); return true;
+      send(res, 200, { user: publicUser(fresh), address: await defaultAddress(user.id) }); return true;
     }
+
+    // ---- Orders ----------------------------------------------------------
     if (route === "/api/customer/orders" && method === "GET") {
       const user = await requireUser(req);
       const rows = await db.all("SELECT o.id,o.payload FROM orders o JOIN customer_orders c ON c.order_id=o.id WHERE c.customer_id=? ORDER BY o.created_at DESC LIMIT 100", [user.id]);
-      const orders = rows.map((r) => { const o = JSON.parse(r.payload); return { id: r.id, status: o.status, items: o.items,
-        totalCents: o.totalCents, subtotalCents: o.subtotalCents, tracking: o.tracking || "", createdAt: o.createdAt }; });
-      send(res, 200, { orders }); return true;
+      send(res, 200, {
+        orders: rows.map((r) => customerOrder(JSON.parse(r.payload))),
+      }); return true;
     }
+    const orderMatch = route.match(/^\/api\/customer\/orders\/(OF-[A-F0-9]{12})$/);
+    if (orderMatch && method === "GET") {
+      const user = await requireUser(req);
+      // Ownership is enforced in the query itself, so a guessed id can never
+      // reveal whether somebody else's order exists.
+      const row = await db.get("SELECT o.payload FROM orders o JOIN customer_orders c ON c.order_id=o.id WHERE o.id=? AND c.customer_id=?", [orderMatch[1], user.id]);
+      if (!row) throw fail(404, "Pedido no encontrado.");
+      send(res, 200, { order: customerOrder(JSON.parse(row.payload), true) }); return true;
+    }
+
+    // ---- Addresses -------------------------------------------------------
+    if (route === "/api/customer/addresses" && ["GET", "POST"].includes(method)) {
+      const user = await requireUser(req);
+      if (method === "GET") {
+        const rows = await db.all("SELECT * FROM customer_addresses WHERE customer_id=? ORDER BY is_default DESC, created_at, rowid", [user.id]);
+        send(res, 200, { addresses: rows.map(addressOf) }); return true;
+      }
+      limit("customer-address:" + user.id, 60, 3600e3);
+      const data = await body(req), { label, value } = addressInput(data, user);
+      const at = new Date(now()).toISOString(), id = randomUUID();
+      const created = await db.tx(async (tx) => {
+        const count = (await tx.get("SELECT COUNT(*) AS n FROM customer_addresses WHERE customer_id=?", [user.id])).n;
+        const isDefault = data.isDefault === true || count === 0;
+        if (isDefault) await tx.run("UPDATE customer_addresses SET is_default=0 WHERE customer_id=?", [user.id]);
+        await tx.run(
+          `INSERT INTO customer_addresses(id,customer_id,label,name,phone,street,number,neighborhood,city,state,postal_code,notes,is_default,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [id, user.id, label, value.name, value.phone, value.street, value.number ?? "", value.neighborhood, value.city, value.state, value.postalCode, value.notes ?? "", isDefault ? 1 : 0, at, at],
+        );
+        return tx.get("SELECT * FROM customer_addresses WHERE id=?", [id]);
+      });
+      send(res, 201, { address: addressOf(created) }); return true;
+    }
+    const addressMatch = route.match(/^\/api\/customer\/addresses\/([a-f0-9-]{36})(\/default)?$/i);
+    if (addressMatch) {
+      const user = await requireUser(req), id = addressMatch[1];
+      const owned = await db.get("SELECT * FROM customer_addresses WHERE id=? AND customer_id=?", [id, user.id]);
+      if (!owned) throw fail(404, "Dirección no encontrada.");
+      if (addressMatch[2] && method === "POST") {
+        limit("customer-address:" + user.id, 60, 3600e3);
+        await body(req);
+        await db.tx(async (tx) => {
+          await tx.run("UPDATE customer_addresses SET is_default=0 WHERE customer_id=? AND is_default=1", [user.id]);
+          await tx.run("UPDATE customer_addresses SET is_default=1,updated_at=? WHERE id=? AND customer_id=?", [new Date(now()).toISOString(), id, user.id]);
+        });
+        const fresh = await db.get("SELECT * FROM customer_addresses WHERE id=?", [id]);
+        send(res, 200, { address: addressOf(fresh) }); return true;
+      }
+      if (method === "PATCH") {
+        limit("customer-address:" + user.id, 60, 3600e3);
+        const data = await body(req);
+        const merged = {
+          label: data.label === undefined ? owned.label : data.label,
+          name: data.name === undefined ? owned.name : data.name,
+          phone: data.phone === undefined ? owned.phone : data.phone,
+          street: data.street === undefined ? owned.street : data.street,
+          number: data.number === undefined ? owned.number : data.number,
+          neighborhood: data.neighborhood === undefined ? owned.neighborhood : data.neighborhood,
+          city: data.city === undefined ? owned.city : data.city,
+          state: data.state === undefined ? owned.state : data.state,
+          postalCode: data.postalCode === undefined ? owned.postal_code : data.postalCode,
+          notes: data.notes === undefined ? owned.notes : data.notes,
+        };
+        const { label, value } = addressInput(merged, user);
+        const at = new Date(now()).toISOString();
+        await db.tx(async (tx) => {
+          if (data.isDefault === true) await tx.run("UPDATE customer_addresses SET is_default=0 WHERE customer_id=?", [user.id]);
+          await tx.run(
+            `UPDATE customer_addresses SET label=?,name=?,phone=?,street=?,number=?,neighborhood=?,city=?,state=?,postal_code=?,notes=?,is_default=?,updated_at=?
+             WHERE id=? AND customer_id=?`,
+            [label, value.name, value.phone, value.street, value.number ?? "", value.neighborhood, value.city, value.state, value.postalCode, value.notes ?? "",
+              data.isDefault === true || !!owned.is_default ? 1 : 0, at, id, user.id],
+          );
+          await ensureDefault(tx, user.id);
+        });
+        const fresh = await db.get("SELECT * FROM customer_addresses WHERE id=?", [id]);
+        send(res, 200, { address: addressOf(fresh) }); return true;
+      }
+      if (method === "DELETE") {
+        limit("customer-address:" + user.id, 60, 3600e3);
+        await body(req);
+        // Deleting a saved address never touches past orders: their shipping
+        // data is a snapshot inside the order payload.
+        await db.tx(async (tx) => {
+          await tx.run("DELETE FROM customer_addresses WHERE id=? AND customer_id=?", [id, user.id]);
+          await ensureDefault(tx, user.id);
+        });
+        send(res, 200, { ok: true }); return true;
+      }
+    }
+
+    // ---- Email change ----------------------------------------------------
+    if (route === "/api/customer/email" && method === "POST") {
+      const user = await requireUser(req);
+      limit("customer-email-change:" + user.id, 6, 3600e3); requireMail();
+      const data = await body(req);
+      if (!(await verifyPassword(data.password, user.password_hash))) throw fail(401, "La contraseña no es correcta.");
+      const email = normalizeCustomerEmail(data.email);
+      if (email === user.email) throw fail(400, "Ese ya es el correo de tu cuenta.");
+      // Same response whether the address is free or already registered.
+      if (!(await db.get("SELECT id FROM customers WHERE email=?", [email]))) await sendEmailChange(user, email);
+      send(res, 200, { message: genericEmailChange }); return true;
+    }
+    if (route === "/api/customer/email/confirm" && method === "POST") {
+      limit("customer-token:" + ip, 12, 3600e3);
+      const data = await body(req);
+      if (typeof data.token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(data.token)) throw fail(400, "El enlace no es válido o ha vencido.");
+      const email = await db.tx(async (tx) => {
+        const row = await tx.get("SELECT * FROM customer_email_changes WHERE token_hash=? AND expires>?", [digest(data.token), now()]);
+        if (!row) throw fail(400, "El enlace no es válido o ha vencido.");
+        await tx.run("DELETE FROM customer_email_changes WHERE token_hash=?", [digest(data.token)]);
+        if (await tx.get("SELECT id FROM customers WHERE email=? AND id<>?", [row.new_email, row.customer_id]))
+          throw fail(409, "Esa dirección ya no está disponible. Solicita otro cambio desde tu cuenta.");
+        await tx.run("UPDATE customers SET email=?,verified_at=? WHERE id=?", [row.new_email, new Date(now()).toISOString(), row.customer_id]);
+        // Consent is tied to an address: a new address starts with no marketing
+        // choice recorded, and every existing session is revoked.
+        await tx.run("DELETE FROM customer_preferences WHERE customer_id=?", [row.customer_id]);
+        await tx.run("DELETE FROM customer_sessions WHERE customer_id=?", [row.customer_id]);
+        await tx.run("DELETE FROM customer_tokens WHERE customer_id=?", [row.customer_id]);
+        await tx.run("DELETE FROM customer_email_changes WHERE customer_id=?", [row.customer_id]);
+        return row.new_email;
+      });
+      cookie(res, cookieName, "", 0);
+      send(res, 200, { email, message: "Correo actualizado y verificado. Inicia sesión con tu nueva dirección." }); return true;
+    }
+
+    // ---- Commercial preferences -----------------------------------------
+    if (route === "/api/customer/preferences" && ["GET", "PATCH"].includes(method)) {
+      const user = await requireUser(req);
+      if (method === "PATCH") {
+        limit("customer-preferences:" + user.id, 20, 3600e3);
+        const data = await body(req);
+        if (typeof data.marketing !== "boolean") throw fail(400, "Indica si autorizas comunicaciones comerciales.");
+        if (data.marketing && data.consentVersion !== MARKETING_VERSION)
+          throw fail(400, "Confirma el texto de consentimiento vigente.");
+        const at = new Date(now()).toISOString();
+        await db.tx(async (tx) => {
+          await tx.run(
+            `INSERT INTO customer_preferences(customer_id,marketing_consent,consent_version,consent_text,updated_at)
+             VALUES(?,?,?,?,?) ON CONFLICT(customer_id) DO UPDATE SET marketing_consent=excluded.marketing_consent,
+             consent_version=excluded.consent_version,consent_text=excluded.consent_text,updated_at=excluded.updated_at`,
+            [user.id, data.marketing ? "granted" : "withdrawn", MARKETING_VERSION, MARKETING_TEXT, at],
+          );
+          // Withdrawal must reach the only commercial list that exists today.
+          if (!data.marketing)
+            await tx.run("UPDATE vip_members SET status='withdrawn',withdrawn_at=COALESCE(withdrawn_at,?) WHERE email=? AND status='active'", [at, user.email]);
+        });
+      }
+      const row = await db.get("SELECT * FROM customer_preferences WHERE customer_id=?", [user.id]);
+      send(res, 200, {
+        marketing: row ? row.marketing_consent : "unset",
+        consentVersion: MARKETING_VERSION,
+        consentText: MARKETING_TEXT,
+        updatedAt: row ? row.updated_at : null,
+        emailEnabled: mail.enabled,
+      }); return true;
+    }
+
+    // ---- Sessions --------------------------------------------------------
+    if (route === "/api/customer/sessions/revoke-all" && method === "POST") {
+      const user = await requireUser(req, false);
+      limit("customer-sessions:" + user.id, 10, 3600e3);
+      await body(req);
+      // SQLite sessions are server-side rows, so every device can be revoked.
+      await db.run("DELETE FROM customer_sessions WHERE customer_id=?", [user.id]);
+      cookie(res, cookieName, "", 0);
+      send(res, 200, { ok: true, message: "Cerramos la sesión en todos los dispositivos." }); return true;
+    }
+
     if (route === "/api/contact" && method === "POST") {
       limit("contact:" + ip, 3, 3600e3);
       const data = await body(req);

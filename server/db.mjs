@@ -68,6 +68,52 @@ export async function readSchemaVersion(db) {
   return Number(row?.user_version ?? 0);
 }
 
+// Version 3 moves the single address blob stored in customers.address into the
+// normalized table. The blob is only cleared after the row is written, inside
+// the same transaction, so a failure leaves the original data intact.
+async function migrateLegacyAddresses(tx, at) {
+  const rows = await tx.all(
+    "SELECT id,address FROM customers WHERE address IS NOT NULL AND TRIM(address)<>''",
+  );
+  for (const row of rows) {
+    const existing = await tx.get(
+      "SELECT id FROM customer_addresses WHERE customer_id=? LIMIT 1",
+      [row.id],
+    );
+    if (existing) continue;
+    let value;
+    try {
+      value = JSON.parse(row.address);
+    } catch {
+      continue; // Unreadable legacy value: keep it untouched for manual review.
+    }
+    if (!value || typeof value !== "object") continue;
+    const field = (key) => (typeof value[key] === "string" ? value[key].trim() : "");
+    if (!field("street")) continue;
+    await tx.run(
+      `INSERT INTO customer_addresses(id,customer_id,label,name,phone,street,number,neighborhood,city,state,postal_code,notes,is_default,created_at,updated_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)`,
+      [
+        `ADR-${row.id.slice(0, 8)}-LEGACY`,
+        row.id,
+        "",
+        field("name") || "Titular",
+        field("phone"),
+        field("street"),
+        field("number"),
+        field("neighborhood"),
+        field("city"),
+        field("state"),
+        field("postalCode"),
+        field("notes"),
+        at,
+        at,
+      ],
+    );
+    await tx.run("UPDATE customers SET address=NULL WHERE id=?", [row.id]);
+  }
+}
+
 export async function migrate(db, { now = () => new Date().toISOString(), seed = true } = {}) {
   return db.tx(async (tx) => {
     const current = await readSchemaVersion(tx);
@@ -75,6 +121,7 @@ export async function migrate(db, { now = () => new Date().toISOString(), seed =
     for (const statement of schemaStatements()) await tx.exec(statement);
     if (current < SCHEMA_VERSION) {
       if (current < 1 && seed) await seedHoodie(tx, now());
+      if (current < 3) await migrateLegacyAddresses(tx, now());
       await tx.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     }
     return SCHEMA_VERSION;

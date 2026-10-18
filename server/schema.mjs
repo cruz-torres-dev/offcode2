@@ -1,6 +1,6 @@
 // SQLite schema; existing tables are preserved by idempotent migrations.
-export const SCHEMA_VERSION = 2;
-export const SCHEMA_NAME = "catalog_and_inventory";
+export const SCHEMA_VERSION = 3;
+export const SCHEMA_NAME = "customer_account";
 
 const SQLITE = [
   `CREATE TABLE IF NOT EXISTS owner_auth (
@@ -140,6 +140,46 @@ const SQLITE = [
     order_id TEXT PRIMARY KEY REFERENCES orders(id), customer_id TEXT NOT NULL REFERENCES customers(id)
   )`,
   `CREATE INDEX IF NOT EXISTS customer_orders_customer ON customer_orders(customer_id)`,
+  // Saved shipping addresses. A partial unique index keeps at most one default
+  // per customer without relying on application discipline.
+  `CREATE TABLE IF NOT EXISTS customer_addresses (
+    id TEXT PRIMARY KEY,
+    customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    label TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    street TEXT NOT NULL,
+    number TEXT NOT NULL DEFAULT '',
+    neighborhood TEXT NOT NULL,
+    city TEXT NOT NULL,
+    state TEXT NOT NULL,
+    postal_code TEXT NOT NULL,
+    notes TEXT NOT NULL DEFAULT '',
+    is_default INTEGER NOT NULL DEFAULT 0 CHECK(is_default IN (0,1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS customer_addresses_customer ON customer_addresses(customer_id, created_at)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS customer_addresses_default ON customer_addresses(customer_id) WHERE is_default=1`,
+  // Commercial email preference. Absence of a row means "no choice recorded",
+  // which is never treated as consent.
+  `CREATE TABLE IF NOT EXISTS customer_preferences (
+    customer_id TEXT PRIMARY KEY REFERENCES customers(id) ON DELETE CASCADE,
+    marketing_consent TEXT NOT NULL CHECK(marketing_consent IN ('granted','withdrawn')),
+    consent_version TEXT NOT NULL,
+    consent_text TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  // Pending email change. The link is sent to the NEW address only, and the
+  // address on file is untouched until that link is consumed.
+  `CREATE TABLE IF NOT EXISTS customer_email_changes (
+    token_hash TEXT PRIMARY KEY,
+    customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    new_email TEXT NOT NULL,
+    expires INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS customer_email_changes_customer ON customer_email_changes(customer_id)`,
 ];
 
 export function schemaStatements() { return SQLITE; }
@@ -149,6 +189,7 @@ export const TABLE_ORDER = Object.freeze([
   "shipping_jobs", "products", "product_images", "variants", "inventory",
   "inventory_movements", "order_reservations", "customers", "customer_identities",
   "customer_sessions", "customer_tokens", "customer_oauth", "customer_orders",
+  "customer_addresses", "customer_preferences", "customer_email_changes",
 ]);
 
 export const movementOrder = () => "created_at DESC, rowid DESC";

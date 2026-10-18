@@ -22,7 +22,9 @@ const parse = (value, label) => {
 };
 export function initialSettings(options) {
   return {
-    enabled: options.enabled ?? process.env.ORDERS_ENABLED === "true",
+    enabled:
+      options.enabled ??
+      (options.ordersEnabledEnv ?? process.env.ORDERS_ENABLED) === "true",
     whatsapp: options.whatsapp ?? process.env.SALES_WHATSAPP ?? "",
     privacyUrl: options.privacyUrl ?? process.env.PRIVACY_URL ?? "",
     termsUrl: options.termsUrl ?? process.env.TERMS_URL ?? "",
@@ -204,7 +206,7 @@ export function validateActivation(
 }
 export function readiness(
   value,
-  { production, keyConfigured, passwordConfigured },
+  { production, keyConfigured, passwordConfigured, lockedByEnv = false },
 ) {
   let salesError = "",
     shippingError = "";
@@ -266,10 +268,12 @@ export function readiness(
     {
       id: "orders",
       label: "Recepción de pedidos",
-      ok: value.enabled,
-      detail: value.enabled
-        ? "Habilitada. Inventario y depósitos siguen verificándose manualmente."
-        : "Cerrada; la tienda permanece en demostración.",
+      ok: value.enabled && !lockedByEnv,
+      detail: lockedByEnv
+        ? "Bloqueada por ORDERS_ENABLED=false en el servidor. El panel no puede habilitarla; cambia esa variable en Render."
+        : value.enabled
+          ? "Habilitada. Inventario y depósitos siguen verificándose manualmente."
+          : "Cerrada; la tienda permanece en demostración.",
     },
   ];
 }

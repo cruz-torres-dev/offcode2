@@ -555,3 +555,25 @@ footer {
     font-size: 12px;
   }
 }
+
+/* Checkout: opt-in reuse of a saved address. Only rendered after a verified
+   login, and only copied into the form when the person clicks. */
+.saved-address {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 24px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+.saved-address-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #4a4a4a;
+}
+.saved-address button {
+  justify-self: start;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
