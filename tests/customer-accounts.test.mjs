@@ -98,8 +98,17 @@ test("Aislamiento de dos clientes: perfil, dirección y pedidos solo del titular
     assert.deepEqual(aOrders.map((o) => o.id), [created.data.id]);
     assert.ok(!JSON.stringify(aOrders).includes(old.data.id));
     assert.equal((await b.call("/api/customer/orders/" + created.data.id)).status, 404);
-    const profile = await a.call("/api/customer/profile", { customerId: "not-used", name: "Titular Sintetico", address: customer("evil@example.test") }, "PATCH");
-    assert.equal(profile.status, 200); assert.equal(profile.data.address.email, "a@example.test");
+    const profile = await a.call("/api/customer/profile", { customerId: "not-used", name: "Titular Sintetico" }, "PATCH");
+    assert.equal(profile.status, 200); assert.equal(profile.data.user.name, "Titular Sintetico");
+    // A saved address always takes the account email from the session, never
+    // from the body, and belongs only to its owner.
+    const saved = await a.call("/api/customer/addresses", { ...customer("evil@example.test"), label: "Casa" });
+    assert.equal(saved.status, 201);
+    assert.equal(saved.data.address.isDefault, true);
+    assert.equal(saved.data.address.label, "Casa");
+    assert.equal((await b.call("/api/customer/addresses")).data.addresses.length, 0);
+    assert.equal((await b.call("/api/customer/addresses/" + saved.data.address.id, {}, "DELETE")).status, 404);
+    assert.equal((await a.call("/api/customer/profile")).data.address.id, saved.data.address.id);
     assert.equal((await b.call("/api/customer/profile")).data.address, null);
     assert.equal((await guest.call("/api/customer/profile")).status, 401);
     assert.equal((await a.call("/api/customer/logout", {}, "POST", { Origin: "https://evil.test" })).status, 403);
@@ -254,8 +263,8 @@ test("Migración desde versión 1 añade cuentas sin duplicar catálogo ni tocar
       await tx.run("UPDATE inventory SET on_hand=7,configured=1 WHERE variant_id='VAR-HOODIE-M'");
       await tx.run("INSERT INTO orders(id,request_key,created_at,payload) VALUES(?,?,?,?)", ["OF-LEGACY", "legacy", "2026-01-01", '{"id":"OF-LEGACY","status":"requested"}']);
     });
-    assert.equal(await migrate(app.db), 2);
-    assert.equal(await migrate(app.db), 2);
+    assert.equal(await migrate(app.db), SCHEMA_VERSION);
+    assert.equal(await migrate(app.db), SCHEMA_VERSION);
     assert.equal((await app.db.get("SELECT on_hand FROM inventory WHERE variant_id='VAR-HOODIE-M'")).on_hand, 7);
     assert.equal((await app.db.get("SELECT COUNT(*) AS n FROM products")).n, 1);
     assert.equal((await app.db.get("SELECT COUNT(*) AS n FROM orders")).n, 1);

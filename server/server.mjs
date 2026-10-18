@@ -125,6 +125,13 @@ export async function createApp(options = {}) {
     passwordHash = password ? scryptSync(password, salt, 64) : null;
   const waitlistEnabled =
     options.waitlistEnabled ?? process.env.WAITLIST_ENABLED === "true";
+  // Hard safety switch. An explicit ORDERS_ENABLED=false in the process
+  // environment keeps order reception closed no matter what the encrypted
+  // dashboard settings say; the panel cannot override it. Unset (or any other
+  // value) leaves the stored setting in charge, as before.
+  const ordersEnabledEnv =
+    options.ordersEnabledEnv ?? process.env.ORDERS_ENABLED;
+  const ordersLockedByEnv = ordersEnabledEnv === "false";
   const db = await openDatabase({
     driver: options.driver,
     path: options.databasePath,
@@ -147,6 +154,10 @@ export async function createApp(options = {}) {
     );
     const stored = await store.read();
     currentSettings = stored?.value ?? initialSettings(options);
+    // The environment switch wins over any stored value, so a stale or
+    // accidental "enabled: true" can never reopen sales while it is false.
+    if (ordersLockedByEnv && currentSettings.enabled)
+      currentSettings = { ...currentSettings, enabled: false };
     settingsVersion = stored?.version ?? 0;
     settingsUpdatedAt = stored?.updatedAt ?? null;
     shipping = validateActivation(currentSettings, {
@@ -464,11 +475,11 @@ export async function createApp(options = {}) {
           return send(res, 200, { ok: true });
         }
         if (route === "/api/orders" && req.method === "POST") {
-          if (!enabled)
+          if (ordersLockedByEnv || !enabled)
             throw httpError(503, "Los pedidos todavía no están habilitados.");
           limit("order:" + ip, 300, 3600e3);
           const data = await body(req);
-          if (!enabled)
+          if (ordersLockedByEnv || !enabled)
             throw httpError(503, "Los pedidos todavía no están habilitados.");
           if (data.consent !== true)
             throw httpError(
@@ -661,6 +672,7 @@ export async function createApp(options = {}) {
                 production,
                 keyConfigured: store.keyConfigured,
                 passwordConfigured: !!passwordHash,
+                lockedByEnv: ordersLockedByEnv,
               }),
             });
           if (route === "/api/admin/settings" && req.method === "PATCH") {
@@ -686,6 +698,11 @@ export async function createApp(options = {}) {
                 "Espera a que termine la operación de guía antes de cambiar la configuración.",
               );
             const candidate = normalizeSettings(data.settings, currentSettings);
+            if (ordersLockedByEnv && candidate.enabled)
+              throw httpError(
+                409,
+                "La recepción de pedidos está bloqueada por ORDERS_ENABLED=false en el servidor. El panel no puede habilitarla; cambia esa variable en Render.",
+              );
             const provider = validateActivation(candidate, {
               production,
               passwordConfigured: !!passwordHash,
