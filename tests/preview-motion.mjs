@@ -1,6 +1,10 @@
 // Local-only visual harness. Run alongside npm run preview:shipping.
 // Media preferences and pointer events are simulated, never applied to the OS.
 import { createServer } from "node:http";
+const qaPort = Number(process.env.OFFCODE_QA_PORT ?? 8014);
+const upstreamPort = Number(process.env.OFFCODE_QA_UPSTREAM_PORT ?? 8013);
+if (![qaPort, upstreamPort].every((p) => Number.isInteger(p) && p > 0 && p < 65536))
+  throw Error("Puerto local QA inválido.");
 
 const setup = (mode) => `
 (() => {
@@ -76,13 +80,13 @@ const setup = (mode) => `
 
 const server = createServer(async (req, res) => {
   try {
-    const url = new URL(req.url, "http://127.0.0.1:8014");
+    const url = new URL(req.url, `http://127.0.0.1:${qaPort}`);
     const mode = url.searchParams.get("qaMode") || "normal";
     if (url.pathname === "/__qa-setup.js") {
       res.writeHead(200, { "Content-Type": "application/javascript", "Cache-Control": "no-store" });
       return res.end(setup(mode));
     }
-    const upstream = await fetch("http://127.0.0.1:8013" + url.pathname);
+    const upstream = await fetch(`http://127.0.0.1:${upstreamPort}` + url.pathname);
     const type = upstream.headers.get("content-type") || "application/octet-stream";
     let body = Buffer.from(await upstream.arrayBuffer());
     if (url.pathname === "/") {
@@ -104,4 +108,4 @@ const server = createServer(async (req, res) => {
     res.end("Inicia npm run preview:shipping antes de esta prueba local.");
   }
 });
-server.listen(8014, "127.0.0.1", () => console.log("Pruebas visuales LOCALES: http://127.0.0.1:8014/?qaMode=normal"));
+server.listen(qaPort, "127.0.0.1", () => console.log(`Pruebas visuales LOCALES: http://127.0.0.1:${qaPort}/?qaMode=normal`));

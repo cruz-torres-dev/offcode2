@@ -56,10 +56,11 @@ async function init() {
       "La recepción de pedidos no está conectada en esta vista. Puedes seguir explorando la colección.";
     return;
   }
-  const saleSizes =
-    Array.isArray(config.product?.saleSizes) && config.product.saleSizes.length
-      ? config.product.saleSizes
-      : FALLBACK_SALE_SIZES;
+  // Trust the server list even when empty: with no counted stock there is
+  // nothing to sell, so the bag is never validated against a fixed fallback.
+  const saleSizes = Array.isArray(config.product?.saleSizes)
+    ? config.product.saleSizes
+    : FALLBACK_SALE_SIZES;
   if (!validBag(saleSizes)) {
     $("#availability").textContent =
       "Tu bolsa incluye una talla que no está habilitada para venta. Vuelve a la colección para elegirla de nuevo.";

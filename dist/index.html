@@ -7,12 +7,14 @@
     <meta name="color-scheme" content="dark" />
     <meta
       name="description"
-      content="Hoodie oversize negra de 100% algodón, 420 g/m². Galería, guía de tallas y pedidos por transferencia bancaria con envío FedEx."
+      content="Hoodie oversize negra de 100% algodón, 420 g/m². Galería y pedidos por transferencia bancaria con envío FedEx."
     />
     <title>LA AFRO × OFFCODE — OFFCODE™</title>
     <link rel="icon" type="image/png" href="assets/monogram-static.png" />
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="motion.css" />
+    <link rel="stylesheet" href="account.css" />
+    <script type="module" src="account.js"></script>
     <script src="motion.js" defer></script>
   </head>
   <body>
@@ -64,6 +66,10 @@
           Pausar giro
         </button>
       </div>
+      <div class="header-actions">
+      <button id="account-toggle" type="button" aria-label="Abrir tu cuenta" aria-haspopup="dialog" aria-controls="account-dialog">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7.5" r="3.2"/><path d="M5.5 20v-2a6.5 6.5 0 0 1 13 0v2Z"/></svg>
+      </button>
       <button id="bag" type="button" aria-label="Abrir bolsa de compra, 0 artículos" aria-haspopup="dialog" aria-controls="cart">
         <svg class="bag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
           <rect x="5" y="7.5" width="14" height="13" rx="2" />
@@ -71,6 +77,7 @@
         </svg>
         <span id="count" aria-hidden="true">0</span>
       </button>
+      </div>
     </header>
     <main>
       <section class="hero" aria-labelledby="campaign-title">
@@ -93,26 +100,8 @@
             />
           </picture>
           <picture class="hero-secondary">
-            <source
-              media="(min-width: 761px)"
-              type="image/webp"
-              srcset="
-                assets/campaign-back-640.webp   640w,
-                assets/campaign-back-1170.webp 1170w
-              "
-              sizes="50vw"
-            />
-            <source
-              media="(min-width: 761px)"
-              srcset="assets/campaign-back.jpg"
-            />
-            <img
-              src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-              alt="Gráfico de la espalda de la sudadera en la campaña urbana"
-              width="1170"
-              height="1560"
-              decoding="async"
-            />
+            <source type="image/webp" srcset="assets/offcode-editorial-right-640.webp 640w, assets/offcode-editorial-right-1170.webp 1170w" sizes="(max-width:760px) 100vw, 50vw" />
+            <img src="assets/offcode-editorial-right.jpg" alt="Persona con hoodie negra y el rostro cubierto, junto a una pieza decorativa blanca y azul" width="1170" height="1560" decoding="async" />
           </picture>
         </div>
         <div class="hero-shade"></div>
@@ -159,30 +148,34 @@
                 width="1080"
                 height="1080"
                 id="gallery-main"
-                src="assets/product-front.jpg"
+                src="assets/product-front-main.webp"
                 alt="Frente de la sudadera LA AFRO × OFFCODE"
               /><span class="zoom-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M7.5 10.5h6m-3-3v6"/></svg></span>
             </button>
             <div class="gallery-controls">
-              <button id="photo-prev" aria-label="Foto anterior">←</button
-              ><span id="photo-label" aria-live="polite">01 / FRENTE</span
-              ><button id="photo-next" aria-label="Foto siguiente">→</button>
+              <button id="photo-prev" type="button" aria-label="Foto anterior">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M19 12H5m6-6-6 6 6 6"/></svg>
+              </button>
+              <span id="photo-label" aria-live="polite">01 / FRENTE</span>
+              <button id="photo-next" type="button" aria-label="Foto siguiente">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
+              </button>
             </div>
             <div class="gallery-thumbs" aria-label="Vistas de la sudadera">
               <button data-photo="0" aria-pressed="true" class="active">
                 <img
                   loading="lazy"
-                  src="assets/product-front.jpg"
+                  src="assets/product-front-thumb.webp"
                   alt=""
                 /><span>Frente</span></button
               ><button data-photo="1" aria-pressed="false">
-                <img loading="lazy" src="assets/product-back.jpg" alt="" /><span
+                <img loading="lazy" src="assets/product-back-thumb.webp" alt="" /><span
                   >Espalda</span
                 ></button
               ><button data-photo="2" aria-pressed="false">
                 <img
                   loading="lazy"
-                  src="assets/product-detail.jpg"
+                  src="assets/product-detail-thumb.webp"
                   alt=""
                 /><span>Detalle</span>
               </button>
@@ -215,15 +208,6 @@
                 ><button data-size="XL" aria-pressed="false">XL</button>
               </div>
               <p class="sold-out-note" id="sold-out-note" hidden></p>
-              <button
-                type="button"
-                class="size-guide-open"
-                id="size-guide-open"
-                aria-haspopup="dialog"
-                aria-controls="size-guide"
-              >
-                Guía de tallas y medidas <span aria-hidden="true">↗</span>
-              </button>
             </fieldset>
             <div class="quantity">
               <label for="quantity">Cantidad</label>
@@ -258,16 +242,8 @@
                 <div><dt>Temporada</dt><dd>SS 2026</dd></div>
               </dl>
               <p>
-                Medidas por talla y cuidados de lavado se publicarán cuando la
-                marca confirme la información del taller. No mostramos cifras
-                estimadas.
-              </p>
-            </details>
-            <details>
-              <summary>Envíos y cambios <span>+</span></summary>
-              <p id="conditions-text">
-                Esta es una tienda de prueba. No se procesan pagos ni envíos.
-                Las condiciones comerciales aún están por definir.
+                Los cuidados de lavado se publicarán cuando la marca confirme
+                la información del taller.
               </p>
             </details>
           </div>
@@ -341,11 +317,11 @@
     </main>
     <footer>
       <a class="wordmark" href="#">OFFCODE<sup>™</sup></a>
-      <p id="footer-mode">Concepto web de demostración · OFFCODE</p>
-      <nav class="footer-links" aria-label="Información de compra" hidden>
+      <p id="footer-mode">OFFCODE™ · Hecho para salir del código.</p>
+      <nav class="footer-links" aria-label="Información de compra">
         <a id="footer-privacy" hidden>Privacidad</a
         ><a id="footer-terms" hidden>Condiciones de compra</a
-        ><a id="footer-contact" hidden>Contacto ↗</a>
+        ><a id="footer-contact" href="contacto.html">Contacto ↗</a>
       </nav>
       <a href="#">Volver arriba ↑</a>
     </footer>
@@ -366,72 +342,32 @@
       <button id="checkout" class="button dark">Probar pedido →</button>
       <p id="checkout-message" role="status"></p>
     </dialog>
-    <dialog id="product-modal" aria-label="Fotograf&#237;a ampliada del producto">
+    <dialog id="product-modal" aria-labelledby="viewer-title">
       <div class="dialog-head">
-        <h2>LA AFRO × OFFCODE</h2>
+        <h2 id="viewer-title">LAAFRO × OFFCODE</h2>
         <button class="close" aria-label="Cerrar foto">✕</button>
       </div>
-      <div class="zoom-toolbar">
-        <button id="zoom-toggle" type="button" aria-pressed="false" aria-controls="zoom-viewport" aria-label="Acercar fotograf&#237;a al doble">
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6M7 10h6"/><path class="zoom-plus" d="M10 7v6"/></svg>
-          <span>Acercar 2&#215;</span>
+      <div class="viewer-stage">
+        <button id="viewer-prev" class="viewer-arrow" type="button" aria-label="Imagen anterior">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 5-7 7 7 7"/></svg>
         </button>
-        <p id="zoom-help">Acerca la foto para ver los detalles.</p>
+        <div id="zoom-viewport" tabindex="0" role="button" aria-pressed="false" aria-label="Ampliar fotografía" aria-describedby="viewer-instructions">
+          <img draggable="false" id="zoom-image" width="1080" height="1080" alt="Vista ampliada del producto" />
+        </div>
+        <button id="viewer-next" class="viewer-arrow" type="button" aria-label="Imagen siguiente">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10 5 7 7-7 7"/></svg>
+        </button>
       </div>
-      <div id="zoom-viewport" tabindex="0" role="region" aria-label="Detalle de la prenda" aria-describedby="zoom-help">
-      <img draggable="false"
-        id="zoom-image"
-        src="assets/product-front.jpg"
-        alt="Vista ampliada del frente de la sudadera"
-      />
+      <div class="viewer-bottom">
+        <p id="viewer-position" role="status" aria-live="polite"></p>
+        <div id="viewer-thumbs" class="gallery-thumbs" role="group" aria-label="Fotografías del producto"></div>
       </div>
-    </dialog>
-    <dialog id="size-guide" aria-labelledby="size-guide-title">
-      <div class="dialog-head">
-        <h2 id="size-guide-title">Guía de tallas</h2>
-        <button class="close" aria-label="Cerrar guía de tallas">✕</button>
-      </div>
-      <p class="guide-lead">
-        Hoodie oversize de 420 g/m² y 100% algodón. El corte es amplio y
-        holgado: si prefieres una caída más ajustada, elige una talla menos.
-      </p>
-      <table class="guide-table">
-        <caption>
-          Tallas contempladas en la ficha técnica
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">Talla</th>
-            <th scope="col">Disponibilidad</th>
-          </tr>
-        </thead>
-        <tbody id="size-guide-rows">
-          <tr data-guide-size="XS"><th scope="row">XS</th><td data-guide-status>Por confirmar</td></tr>
-          <tr data-guide-size="S"><th scope="row">S</th><td data-guide-status class="is-available">Disponible</td></tr>
-          <tr data-guide-size="M"><th scope="row">M</th><td data-guide-status class="is-available">Disponible</td></tr>
-          <tr data-guide-size="L"><th scope="row">L</th><td data-guide-status class="is-available">Disponible</td></tr>
-          <tr data-guide-size="XL"><th scope="row">XL</th><td data-guide-status class="is-available">Disponible</td></tr>
-          <tr data-guide-size="XXL"><th scope="row">XXL</th><td data-guide-status>Por confirmar</td></tr>
-        </tbody>
-      </table>
-      <section class="guide-measures" aria-labelledby="guide-measures-title">
-        <h3 id="guide-measures-title">Medidas de la prenda</h3>
-        <p id="guide-measures-note">
-          El taller todavía no entregó la tabla de medidas verificadas.
-          Publicaremos ancho de pecho, largo corporal y largo de manga en
-          centímetros en cuanto la marca las confirme; no mostramos cifras
-          estimadas.
-        </p>
-        <div id="guide-measures-table" hidden></div>
-      </section>
-      <p class="guide-note">
-        La disponibilidad se confirma al revisar tu solicitud. El tiempo de
-        tránsito depende del servicio FedEx que se cotice para tu domicilio y el
-        tiempo de preparación se informará cuando la marca lo confirme.
-      </p>
+      <p id="viewer-instructions" class="viewer-sr-only">Pulsa la foto, Enter o espacio para ampliar y restablecer. Arrastra para recorrer la imagen ampliada. Desliza para cambiar de foto o usa las flechas izquierda y derecha. Con zoom, Mayúsculas y flechas desplazan la imagen. En pantalla táctil también puedes ampliar con dos dedos.</p>
     </dialog>
     <div id="toast" role="status" aria-live="polite"></div>
-    <script src="app.js?v=store-zoom-3"></script>
+    <script src="gallery.js?v=gallery-2"></script>
+    <script src="app.js?v=gallery-2"></script>
     <script type="module" src="logo.js"></script>
+    <dialog id="account-dialog" aria-labelledby="account-title"><div id="account-root"></div></dialog>
   </body>
 </html>

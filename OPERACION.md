@@ -45,25 +45,25 @@ Un pedido con guía comprada no puede cancelarse desde el panel; gestiona primer
 
 El aviso de privacidad y las condiciones reales deben explicar el uso de datos de entrega por Envia/FedEx antes de habilitar la cotización. Referencias oficiales: [cotización](https://docs.envia.com/reference/get-shipping-rates), [crear guía](https://docs.envia.com/reference/create-shipping-label), [flujo y entornos](https://docs.envia.com/docs/envia-shipping-api-introduction).
 
-## Ficha de la prenda y guía de tallas
+## Ficha de la prenda
 
 La ficha pública usa solo datos comerciales confirmados por la marca: **hoodie oversize**, color **negro**, **100% algodón**, **420 g/m²** y temporada **SS 2026**. Se muestran en "Ficha de la prenda", dentro de la sección del producto, y salen de `server/catalog.mjs`, que también alimenta `/api/config` (`product`).
 
 El TECH PACK es confidencial. **No se copió al repositorio, a `dist/`, a Git ni al despliegue**; solo se extrajeron los datos comerciales anteriores. No se publican cantidades de inventario, costos, ubicaciones de estampado, medidas de aplicación ni instrucciones de confección.
 
-### Guía de tallas
+### Sin guía de tallas ni promesas de plazo
 
-El botón "Guía de tallas y medidas" abre un `<dialog>` nativo: se cierra con el botón, con Escape y con clic fuera, devuelve el foco al botón y no anima nada con `prefers-reduced-motion`.
+La marca confirmó que **no entregará la tabla de medidas de la prenda ni un tiempo de preparación**, así que ya no se publican: la tienda no muestra guía de tallas, tabla de centímetros ni promesa de preparación o entrega. Tampoco se inventan medidas ni tallas corporales.
 
-- **Seis tallas contempladas** (XS, S, M, L, XL, XXL) con su disponibilidad real.
-- **Habilitadas para venta hoy: S, M, L, XL.** XS y XXL aparecen como "Por confirmar", no son seleccionables y el servidor las rechaza con 400.
-- **No hay tabla de centímetros.** El documento de confección no incluye medidas de pecho, largo corporal ni manga, así que no se inventan ni se aproximan. El bloque de medidas explica que están pendientes y la tabla permanece oculta.
+- **Seis tallas contempladas** (XS, S, M, L, XL, XXL); el selector de la tienda solo ofrece las habilitadas para venta.
+- **Habilitadas para venta hoy: S, M, L, XL.** XS y XXL no tienen variante, no son seleccionables y el servidor las rechaza con 400.
 
 Configuración, sin tocar HTML ni CSS:
 
-- Habilitar una talla: crear o reactivar su variante en `Productos` del panel. El selector, la guía, el checkout y la validación del servidor se actualizan solos. `server/catalog.mjs` solo declara las seis tallas contempladas.
-- Publicar medidas: rellenar `measurements.rows`, por ejemplo `{ "S": { chest: 58, body: 68, sleeve: 60 } }` en centímetros. La tabla se genera con los campos declarados en `measurements.fields`.
-- Publicar tiempo de preparación: `preparation.businessDays` (hoy `null`, que significa "no se promete ningún plazo").
+- Habilitar una talla: crear o reactivar su variante en `Productos` del panel. El selector, la bolsa, el checkout y la validación del servidor se actualizan solos. `server/catalog.mjs` solo declara las seis tallas contempladas.
+- El tiempo de tránsito lo devuelve únicamente la cotización real de FedEx; no se completa a mano ni se promete una fecha de entrega.
+
+Si la marca confirma medidas o plazos más adelante, habría que añadirlos como datos nuevos y verificados; hoy la tienda (y su API) no incluyen campos para ellos.
 
 ### Envío exclusivamente FedEx
 
@@ -78,11 +78,11 @@ Pendiente para operar FedEx de verdad:
 3. `ENVIA_PACKAGES_JSON` con peso y medidas **medidos** por cantidad de prendas.
 4. Validar cobertura, tarifas y una guía de prueba en sandbox.
 
-La **consulta automática de seguimiento no está implementada**: esta integración no consulta el estado de entrega, y no se añadió un endpoint sin verificarlo antes con la cuenta. El rastreo se registra en el panel y se consulta en el sitio de FedEx. No se promete ningún plazo de entrega: el checkout muestra únicamente lo que devuelve la cotización y el tiempo de preparación sigue sin confirmar.
+La **consulta automática de seguimiento no está implementada**: esta integración no consulta el estado de entrega, y no se añadió un endpoint sin verificarlo antes con la cuenta. El rastreo se registra en el panel y se consulta en el sitio de FedEx. No se promete ningún plazo de entrega: el checkout muestra únicamente lo que devuelve la cotización, y tampoco se promete un tiempo de preparación.
 
 ## Catálogo administrable, inventario y migraciones
 
-El panel `/admin.html` administra el catálogo y el inventario reales. La tienda deja de depender de tallas escritas a mano: el selector, la guía, la bolsa y el checkout se alimentan de la base de datos.
+El panel `/admin.html` administra el catálogo y el inventario reales. La tienda deja de depender de tallas escritas a mano: el selector, la bolsa y el checkout se alimentan de la base de datos.
 
 ### Productos y variantes
 
@@ -116,9 +116,9 @@ La prenda publicada hoy es la hoodie oversize negra (S, M, L, XL). XS y XXL exis
 
 ### Migraciones
 
-- Versionadas con `PRAGMA user_version` y `SCHEMA_VERSION = 1`. El esquema SQLite vive en `server/schema.mjs` y la migración en `server/db.mjs`.
+- Versionadas con `PRAGMA user_version` y `SCHEMA_VERSION = 2`. El esquema SQLite vive en `server/schema.mjs` y la migración en `server/db.mjs`.
 - Idempotentes: arrancar dos veces no duplica productos, variantes ni movimientos. La prueba correspondiente crea el esquema, lo vuelve a migrar y comprueba que los pedidos y productos existentes siguen intactos.
-- DDL, siembra y cambio de versión comparten una transacción SQLite. Una versión futura se rechaza sin alterar tablas. Solo se siembra al actualizar desde una versión menor si `products` está vacía y la siembra está habilitada; nunca se inventan existencias.
+- DDL, siembra y cambio de versión comparten una transacción SQLite. Una versión futura se rechaza sin alterar tablas. Solo se siembra al actualizar desde la versión 0 si `products` está vacía y la siembra está habilitada; nunca se inventan existencias.
 - **La ruta de la base de datos no cambió** (`DATABASE_PATH` o `./data/offcode.sqlite`). Las claves son estables: `PRD-…`, `VAR-…`, `MOV-…` y los pedidos conservan `OF-…`.
 - Integridad referencial activada (`PRAGMA foreign_keys=ON`) y restricciones `CHECK` para cantidades y estados.
 
@@ -234,7 +234,7 @@ Campañas masivas, mensajes automáticos de WhatsApp, envío del PDF de la guía
 
 ## Ejecutar sin publicar
 
-Necesitas Node.js **24.14.x**. No hay proceso de compilación. El visor 3D ya está incluido localmente. SQLite forma parte de Node y emite el aviso de API experimental en esta versión. No hay dependencias npm externas. Ejecuta `npm ci` para validar el lockfile.
+Necesitas Node.js **24.14.x**. No hay proceso de compilación. El visor 3D ya está incluido localmente. SQLite forma parte de Node y emite el aviso de API experimental en esta versión. El acceso de clientes usa correo y contraseña, sin dependencias externas de autenticación. Ejecuta npm ci para validar el lockfile antes de iniciar.
 
 1. Copia `.env.example` a `.env` y edita la copia en tu equipo.
 2. Define ADMIN_PASSWORD, con al menos 16 caracteres. No existe una contraseña predeterminada. No compartas esa clave con compradores.
@@ -262,7 +262,6 @@ Completa estos valores privados en `.env` o en el panel del proveedor de hosting
 - PRIVACY_URL y TERMS_URL: direcciones HTTPS de las páginas reales de privacidad y condiciones de compra de la marca. No se han inventado políticas.
 - PUBLIC_ORIGIN: URL exacta de la tienda; debe ser HTTPS en producción.
 - DATABASE_PATH: ubicación privada del archivo SQLite en almacenamiento persistente.
-- Medidas por talla (ancho de pecho, largo corporal y largo de manga en centímetros) y el tiempo de preparación en días hábiles. Sin ellas la tienda funciona, pero la guía de tallas no publica tabla y no se promete ninguna fecha de entrega.
 
 Confirma también precios, existencias, origen de los envíos, procedimiento para cotizarlos y condiciones de cambios y devoluciones. No actives ventas con datos de ejemplo. Las páginas de privacidad y condiciones deben estar publicadas y revisadas por el propietario.
 
@@ -316,7 +315,7 @@ Con SQLite y disco hay una sola instancia; Render no permite añadir réplicas a
 
 Verifica estos valores en el servicio existente, sin sobrescribir su configuración privada:
 
-- Node 24.14.0, Build Command `echo No build required`, Start Command `npm start`.
+- Node 24.14.0, Build Command `npm ci`, Start Command `npm start`.
 - HOST=0.0.0.0, NODE_ENV=production y PUBLIC_ORIGIN=https://offcode.mx.
 - Disco persistente montado en `/var/data` y DATABASE_PATH=/var/data/offcode.sqlite.
 - Conservar ADMIN_PASSWORD y SETTINGS_ENCRYPTION_KEY existentes, ambas privadas; no reemplazar la clave que cifra los ajustes guardados.
@@ -329,7 +328,7 @@ Verifica estos valores en el servicio existente, sin sobrescribir su configuraci
 2. El despliegue debe usar el **Web Service Node**, no el sitio estático. `render.yaml` describe el sitio estático (`offcode-demo`, publica `./dist`) y no ejecuta la API: en él la tienda se ve, pero los pedidos, el panel y Envia no funcionan. `render-orders.yaml` describe el servicio Node con disco; Render solo lee `render.yaml` por defecto, así que ese archivo **no crea nada por sí solo**.
 3. Confirma antes de desplegar: `DATABASE_PATH=/var/data/offcode.sqlite`, disco montado en `/var/data`, `HOST=0.0.0.0`, `NODE_ENV=production`, `NODE_VERSION=24.14.0`, `ADMIN_PASSWORD` y `SETTINGS_ENCRYPTION_KEY` definidas en el panel (nunca en el repositorio).
 4. Mantén `ORDERS_ENABLED=false` y `ENVIA_ENABLED=false` en el primer arranque.
-5. Al arrancar, la migración crea las tablas de catálogo e inventario si no existen y deja `PRAGMA user_version = 1`. **No borra pedidos ni productos**. La hoodie se siembra solo al migrar desde una versión menor, con siembra habilitada y tabla `products` vacía, **sin existencias** (`configured = 0`).
+5. Al arrancar, la migración crea las tablas de catálogo e inventario si no existen y deja `PRAGMA user_version = 2`. **No borra pedidos ni productos**. La hoodie se siembra solo al migrar desde la versión 0, con siembra habilitada y tabla `products` vacía, **sin existencias** (`configured = 0`).
 6. Revisa los registros de arranque: deben indicar la URL y la ruta SQLite seleccionada, sin credenciales. Un ciclo de reinicios suele indicar que falta `ADMIN_PASSWORD`, que `PUBLIC_ORIGIN` no es un origen HTTPS exacto o que `validateActivation` rechazó la configuración.
 7. Confirma `PUBLIC_ORIGIN=https://offcode.mx` en el servicio existente antes de publicar la actualización. Si el dominio no coincide, las peticiones `POST` del panel y del checkout responden 403 (protección de origen), que es el comportamiento correcto.
 8. Comprueba `/api/config` (200, JSON, `Cache-Control: no-store`), `/admin.html` (200, `no-store`) y `/api/admin/summary` sin sesión (401). No marques pedidos como pagados ni generes guías para "probar".
@@ -347,7 +346,7 @@ Las direcciones de clientes se guardan en el archivo SQLite privado y no se publ
 
 Ejecuta `npm test`. Las pruebas usan datos ficticios y comprueban el ciclo completo, totales del servidor, persistencia tras reinicio, reintentos sin duplicados, control de versiones, acceso privado, rechazo de cambios de estado inválidos y bloqueo de ventas sin configurar.
 
-La suite tiene 58 pruebas aprobadas con Node 24.14.0, sin omisiones. Además del flujo de pedidos, configuración cifrada, token oculto, persistencia de credenciales, cierre de sesiones al cambiar contraseña, invalidación de tarifas al editar datos, cuenta bancaria acordada, búsqueda de pedidos fuera de la primera página y URL automática de Render con prioridad del dominio explícito, cubre el catálogo y el inventario:
+La suite tiene 73 pruebas aprobadas con Node 24.14.0, sin omisiones. Además del flujo de pedidos, configuración cifrada, token oculto, persistencia de credenciales, cierre de sesiones al cambiar contraseña, invalidación de tarifas al editar datos, cuenta bancaria acordada, búsqueda de pedidos fuera de la primera página y URL automática de Render con prioridad del dominio explícito, cubre el catálogo y el inventario:
 
 - Migraciones versionadas e idempotentes que conservan productos y pedidos.
 - Crear, editar, publicar, despublicar y archivar sin perder referencias; SKU duplicado rechazado al crear y al editar.
@@ -366,7 +365,7 @@ La UI de configuración y el flujo hasta una guía ficticia se revisaron en escr
 
 Las siete pruebas de `tests/email.test.mjs` usan un proveedor simulado y datos ficticios: no envían correos reales ni llaman a Resend. Cubren configuración ausente y desactivada por defecto, envío correcto al propietario y al comprador, error y timeout del proveedor, respuesta HTTP 200 sin identificador válido, pedido duplicado sin segundo envío, transición válida, transición inválida, fallo de correo sin pérdida ni duplicación del pedido, reinicio del proceso sin duplicar, ventana de idempotencia vencida, direcciones inválidas, estados superados, pedido que responde sin esperar al proveedor y ausencia de la clave o de datos personales en respuestas, registros y journal. Falta la prueba controlada contra Resend real descrita arriba; no se ejecutó.
 
-Las pruebas de `tests/product.test.mjs` comprueban la ficha pública (seis tallas contempladas, cuatro habilitadas, sin medidas inventadas), el rechazo de tallas no habilitadas y que un fallo de correo o la ausencia del proveedor de envío no pierdan el pedido. `tests/shipping.test.mjs` verifica además que el pedido guarda la tarifa validada, el servicio y el estimado devuelto por FedEx, y que el importe enviado por el navegador se ignora.
+Las pruebas de `tests/product.test.mjs` comprueban la ficha pública (seis tallas contempladas, cuatro habilitadas, sin guía de tallas ni medidas inventadas), el rechazo de tallas no habilitadas y que un fallo de correo o la ausencia del proveedor de envío no pierdan el pedido. `tests/shipping.test.mjs` verifica además que el pedido guarda la tarifa validada, el servicio y el estimado devuelto por FedEx, y que el importe enviado por el navegador se ignora.
 
 Las pruebas Envia sustituyen el transporte HTTP por respuestas sintéticas compatibles con su documentación: no requieren token ni hacen llamadas a la cuenta del propietario. Comprueban FedEx exclusivo, consentimiento, cotización ligada a dirección y prendas, caducidad, total del servidor, acceso privado, pago previo, doble clic, respuesta HTTP200 con error, bloqueo durable, conciliación y persistencia tras reinicio. Las cotizaciones guardadas con datos de entrega se eliminan al vencer, con limpieza cada minuto y al iniciar el servidor; los pedidos conservan su historial según la política del propietario. Falta validar con sandbox real y con las tarifas/cobertura de su cuenta; sin el acceso del propietario no se puede comprobar esa parte.
 
@@ -374,7 +373,12 @@ Para revisar la interfaz sin cuenta ni datos reales, ejecuta `npm run preview:sh
 
 La revisión del navegador usa una base de pruebas en memoria separada. No se hicieron depósitos, no se compraron guías reales, no se enviaron mensajes por WhatsApp y no se envió ningún correo real. El correo transaccional está implementado y desactivado por defecto; las campañas masivas, los mensajes automáticos de WhatsApp, la validación bancaria automática y la gestión de inventario no están implementadas.
 
-Esta entrega crea el commit local solicitado. No hace push, despliegue, cambios del dashboard ni migraciones contra producción.
+La etapa SQLite anterior creó el commit local solicitado. La etapa actual de cuentas no crea otro commit. No hace push, despliegue, cambios del dashboard ni migraciones contra producción.
 
 
-Validación local de esta entrega (17 de octubre de 2026): `npm ci` sin dependencias externas ni vulnerabilidades informadas; `npm test` con 58/58 aprobadas; sintaxis de 31 archivos JS/MJS correcta y `git diff --check` sin errores. `npm run check:load`: 600 consultas de recursos, 120 pedidos y 120 reintentos, cero errores y 120 pedidos únicos en SQLite temporal. Reporte: `qa/load-local.json`. No certifica capacidad ni persistencia del servicio de Render. Los helpers de carga y vista ficticia deshabilitan explícitamente el transporte de correo, incluso si el entorno contiene credenciales.
+Validación local de la etapa SQLite anterior (17 de octubre de 2026): `npm ci` sin dependencias externas ni vulnerabilidades informadas; `npm test` con 58/58 aprobadas; sintaxis de 31 archivos JS/MJS correcta y `git diff --check` sin errores. `npm run check:load`: 600 consultas de recursos, 120 pedidos y 120 reintentos, cero errores y 120 pedidos únicos en SQLite temporal. Reporte: `qa/load-local.json`. No certifica capacidad ni persistencia del servicio de Render. Los helpers de carga y vista ficticia deshabilitan explícitamente el transporte de correo, incluso si el entorno contiene credenciales.
+
+
+## Cuentas de clientes y Contacto
+
+La migración 2 añade cuentas de cliente sin resembrar el catálogo de versión 1, sin cambiar la ruta ni activar ventas. El acceso de cliente está separado del propietario. Registro, verificación, recuperación, perfil/dirección y pedidos propios se documentan en [CUENTAS.md](CUENTAS.md), incluidas las variables privadas, límites y pruebas pendientes. Instalar con npm ci antes de iniciar; el dashboard de Render no se cambia desde el repositorio. La entrega de correos reales en producción queda pendiente. La etapa actual queda sin commit, push ni despliegue.

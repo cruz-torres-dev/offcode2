@@ -106,6 +106,7 @@ test("Migraciones versionadas e idempotentes conservan productos y pedidos", asy
   try {
     app = await start({ databasePath });
     await login(app);
+    await stock(app, "VAR-HOODIE-S", 5);
     const created = await app.call("/api/admin/products", "POST", productInput());
     assert.equal(created.status, 201);
     // Size-only request resolves to the seeded hoodie (legacy carts still work).
@@ -380,7 +381,50 @@ test("Dos solicitudes concurrentes por la última unidad: una gana y la otra se 
   }
 });
 
-test("Stock agotado y variante archivada bloquean la venta; sin configurar no se inventa stock", async () => {
+test("Protección de inventario del servidor: sin contar no vende, cero y última unidad se rechazan", async () => {
+  const app = await start();
+  try {
+    await login(app);
+    const product = (await app.call("/api/admin/products", "POST", productInput({ status: "published" }))).data.product;
+    const small = product.variants.find((v) => v.size === "S");
+    const medium = product.variants.find((v) => v.size === "M");
+    const buy = (variant, size, qty = 1) =>
+      app.call("/api/orders", "POST", request([{ productId: product.id, variantId: variant.id, size, qty }]));
+
+    // 1. Stock not configured: the variant exists but cannot be bought.
+    const unknown = await buy(medium, "M");
+    assert.equal(unknown.status, 400);
+    assert.match(unknown.data.error, /existencias confirmadas/);
+
+    // 2. Counted stock equal to zero is rejected with a stock reason.
+    await stock(app, medium.id, 1);
+    await app.call(`/api/admin/inventory/${medium.id}/movements`, "POST", { type: "adjustment", qty: -1, reason: "Conteo" });
+    const zero = await buy(medium, "M");
+    assert.equal(zero.status, 409);
+    assert.match(zero.data.error, /Sin stock suficiente/);
+    assert.equal((await app.call("/api/admin/orders")).data.total, 0);
+
+    // 3. Positive stock that is enough: accepted and reserved once.
+    await stock(app, small.id, 5);
+    const enough = await buy(small, "S", 2);
+    assert.equal(enough.status, 201);
+    let row = (await app.call("/api/admin/inventory")).data.variants.find((v) => v.id === small.id);
+    assert.equal(row.reserved, 2);
+
+    // 4. Two concurrent purchases of the last unit: only one wins.
+    await stock(app, medium.id, 1);
+    const results = await Promise.all([buy(medium, "M"), buy(medium, "M")]);
+    assert.deepEqual(results.map((r) => r.status).sort(), [201, 409]);
+    row = (await app.call("/api/admin/inventory")).data.variants.find((v) => v.id === medium.id);
+    assert.equal(row.reserved, 1);
+    assert.equal(row.available, 0);
+    assert.equal((await app.call("/api/admin/orders")).data.total, 2);
+  } finally {
+    await app.close();
+  }
+});
+
+test("Stock agotado bloquea la venta y el stock sin configurar tampoco se puede comprar ni reservar", async () => {
   const app = await start();
   try {
     await login(app);
@@ -401,12 +445,15 @@ test("Stock agotado y variante archivada bloquean la venta; sin configurar no se
     assert.equal(blocked.status, 409);
     assert.match(blocked.data.error, /Sin stock suficiente/);
 
-    // Unconfigured stock keeps today's behaviour: the order is accepted, nothing reserved.
-    const accepted = await app.call("/api/orders", "POST", request([{ productId: product.id, size: "M", qty: 1 }]));
-    assert.equal(accepted.status, 201);
+    // Unknown stock can never be bought: the size exists but the owner has not
+    // counted it, so no order is created and nothing is reserved.
+    const unknown = await app.call("/api/orders", "POST", request([{ productId: product.id, size: "M", qty: 1 }]));
+    assert.equal(unknown.status, 400);
+    assert.match(unknown.data.error, /existencias confirmadas/);
     const row = (await app.call("/api/admin/inventory")).data.variants.find((v) => v.id === medium.id);
     assert.equal(row.configured, false);
     assert.equal(row.reserved, 0);
+    assert.equal((await app.call("/api/admin/orders")).data.total, 0);
 
     // Archiving the variant removes it from the storefront and from new orders.
     const edited = await app.call(`/api/admin/products/${product.id}`, "PATCH", {
@@ -458,10 +505,18 @@ test("La tienda solo ofrece variantes vendibles y marca las agotadas como deshab
     assert.equal(sizes.get("S").variantId, small.id);
     assert.equal(sizes.get("S").stockConfigured, true);
     assert.ok(!config.product.saleSizes.includes("S"));
-    // Unconfigured stock stays sellable: no invented stock.
+    // Unknown stock is hidden, not "sold out": no invented stock, no false claim.
     assert.equal(sizes.get("M").soldOut, false);
-    assert.equal(sizes.get("M").available, true);
-    assert.ok(config.product.saleSizes.includes("M"));
+    assert.equal(sizes.get("M").available, false);
+    assert.equal(sizes.get("M").sellable, false);
+    assert.ok(!config.product.saleSizes.includes("M"));
+    // Once the owner counts it, the same size becomes sellable again.
+    await stock(app, product.variants.find((v) => v.size === "M").id, 3);
+    const stocked = (await app.call("/api/config")).data;
+    const stockedSizes = new Map(stocked.product.sizes.map((item) => [item.code, item]));
+    assert.equal(stockedSizes.get("M").sellable, true);
+    assert.equal(stockedSizes.get("M").available, true);
+    assert.ok(stocked.product.saleSizes.includes("M"));
     // Sizes without a variant are not offered at all.
     assert.equal(sizes.get("XXL").variantId, null);
     assert.equal(sizes.get("XXL").available, false);
@@ -496,6 +551,8 @@ test("La bolsa rechaza más de 99 prendas en total, aunque cada talla esté dent
   const app = await start();
   try {
     await login(app);
+    await stock(app, "VAR-HOODIE-S", 70);
+    await stock(app, "VAR-HOODIE-M", 70);
     const tooMany = await app.call(
       "/api/orders",
       "POST",
@@ -517,6 +574,7 @@ test("Un pedido histórico no cambia al editar o archivar el producto", async ()
   try {
     await login(app);
     const product = (await app.call("/api/admin/products", "POST", productInput({ status: "published" }))).data.product;
+    await stock(app, product.variants.find((v) => v.size === "M").id, 3);
     const created = await app.call("/api/orders", "POST", request([{ productId: product.id, size: "M", qty: 1 }]));
     assert.equal(created.status, 201);
     const before = (await app.call("/api/admin/orders")).data.orders.find((o) => o.id === created.data.id);
@@ -626,5 +684,35 @@ test("Reintentos concurrentes idénticos crean un solo pedido y una sola reserva
     assert.equal((await app.call("/api/admin/orders")).data.total, 1);
     const movements = (await app.call("/api/admin/inventory/VAR-HOODIE-M/movements")).data.movements;
     assert.equal(movements.filter((m) => m.type === "reserve").length, 1);
+  } finally { await app.close(); }
+});
+
+
+test("Galería usa todas las fotografías del catálogo, conserva orden y soporta listas de otra longitud", async () => {
+  const app = await start();
+  try {
+    const initial = (await app.call("/api/config")).data.product;
+    assert.equal(initial.images.length, 4);
+    await login(app);
+    const images = Array.from({ length: 6 }, (_, i) => ({ src: `assets/product-${i % 2 ? "back" : "front"}.jpg`, alt: `Vista sintética ${i + 1}` }));
+    const existing = (await app.call("/api/admin/products")).data.products.find((p) => p.id === initial.id);
+    const result = await app.call(`/api/admin/products/${initial.id}`, "PATCH", { ...existing, images });
+    assert.equal(result.status, 200);
+    const config = (await app.call("/api/config")).data;
+    assert.deepEqual(config.product.images, images);
+    assert.equal(config.product.id, initial.id);
+    assert.deepEqual(config.product.sizes, initial.sizes);
+    assert.equal(config.product.priceCents, initial.priceCents);
+    const manifestResponse = await fetch(app.base + "/assets/product-media.json");
+    const manifest = await manifestResponse.json();
+    for (const entry of Object.values(manifest)) for (const kind of ["thumb", "main", "large"]) {
+      const resource = await fetch(app.base + "/" + entry[kind]);
+      assert.equal(resource.status, 200);
+      assert.match(resource.headers.get("content-type"), /image\/webp/);
+      assert.ok((await resource.arrayBuffer()).byteLength > 100);
+    }
+    const viewer = await fetch(app.base + "/gallery.js");
+    assert.match(viewer.headers.get("cache-control"), /^public, max-age=0/);
+    assert.equal((await app.db.get("SELECT COUNT(*) AS n FROM orders")).n, 0);
   } finally { await app.close(); }
 });

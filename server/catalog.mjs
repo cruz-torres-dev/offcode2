@@ -5,10 +5,14 @@
 // fabric weight. Only commercial data belongs here: no supplier names, costs,
 // printing placements, embroidery sizes or manufacturing instructions.
 //
-// The tech pack lists XS–XXL but no quantities and no measurement table, so
-// availability and measurements stay explicitly unconfirmed instead of being
-// guessed. Update this file when the brand confirms them; nothing else in the
-// storefront or the server needs to change.
+// The tech pack lists XS–XXL but no quantities, so availability stays
+// explicitly unconfirmed instead of being guessed. Update this file when the
+// brand confirms them; nothing else in the storefront or the server needs to
+// change.
+//
+// The brand will not provide a measurement table (chest/body/sleeve) or a
+// preparation time, so neither is published here: the storefront shows no size
+// guide and promises no handling or delivery window.
 
 export const SIZES = Object.freeze(["XS", "S", "M", "L", "XL", "XXL"]);
 
@@ -32,21 +36,6 @@ export const PRODUCT = Object.freeze({
   fabricWeightGsm: 420,
   fit: "Oversize",
   sizes: sizeTable,
-  // Shape ready for the real table. `rows` stays empty because the tech pack
-  // has no chest/body/sleeve measurements; no centimetres are invented.
-  measurements: Object.freeze({
-    unit: "cm",
-    fields: Object.freeze([
-      Object.freeze({ key: "chest", label: "Ancho de pecho" }),
-      Object.freeze({ key: "body", label: "Largo corporal" }),
-      Object.freeze({ key: "sleeve", label: "Largo de manga" }),
-    ]),
-    // Example once confirmed: { S: { chest: 0, body: 0, sleeve: 0 } }
-    rows: Object.freeze({}),
-  }),
-  // Preparation time is still unconfirmed by the brand. `null` means "do not
-  // publish a delivery promise"; transit time only comes from a live FedEx quote.
-  preparation: Object.freeze({ businessDays: null }),
 });
 
 export const SALE_SIZES = Object.freeze(
@@ -68,11 +57,5 @@ export function publicProduct() {
     fit: PRODUCT.fit,
     sizes: PRODUCT.sizes.map((s) => ({ code: s.code, available: s.available })),
     saleSizes: [...SALE_SIZES],
-    measurements: {
-      unit: PRODUCT.measurements.unit,
-      fields: PRODUCT.measurements.fields.map((f) => ({ ...f })),
-      rows: { ...PRODUCT.measurements.rows },
-    },
-    preparation: { businessDays: PRODUCT.preparation.businessDays },
   };
 }

@@ -1,0 +1,30 @@
+{
+  "assets/product-front.jpg": {
+    "thumb": "assets/product-front-thumb.webp",
+    "main": "assets/product-front-main.webp",
+    "large": "assets/product-front-large.webp",
+    "width": 1080,
+    "height": 1080
+  },
+  "assets/product-back.jpg": {
+    "thumb": "assets/product-back-thumb.webp",
+    "main": "assets/product-back-main.webp",
+    "large": "assets/product-back-large.webp",
+    "width": 1080,
+    "height": 1080
+  },
+  "assets/product-detail.jpg": {
+    "thumb": "assets/product-detail-thumb.webp",
+    "main": "assets/product-detail-main.webp",
+    "large": "assets/product-detail-large.webp",
+    "width": 3024,
+    "height": 4032
+  },
+  "assets/product-packaging.jpg": {
+    "thumb": "assets/product-packaging-thumb.webp",
+    "main": "assets/product-packaging-main.webp",
+    "large": "assets/product-packaging-large.webp",
+    "width": 3840,
+    "height": 5120
+  }
+}

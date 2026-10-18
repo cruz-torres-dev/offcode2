@@ -83,6 +83,17 @@ test("Transferencia manual: solicitud, confirmación, pago, envío y persistenci
     const login = await app.call("/api/session", "POST", { password });
     assert.equal(login.status, 200);
     assert.match(login.headers.get("set-cookie"), /HttpOnly; SameSite=Strict/);
+    // Stock must be counted before a size can be sold.
+    assert.equal(
+      (
+        await app.call(
+          "/api/admin/inventory/VAR-HOODIE-M/movements",
+          "POST",
+          { type: "entry", qty: 20, reason: "Conteo sintético" },
+        )
+      ).status,
+      201,
+    );
     const request = {
       requestKey: randomUUID(),
       customer,

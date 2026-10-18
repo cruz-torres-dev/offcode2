@@ -218,6 +218,17 @@ test("La cuenta acordada se conserva al editar la tienda; cerrar ventas bloquea 
   const app = await start();
   try {
     await app.call("/api/session", "POST", { password });
+    // Stock must be counted before a size can be sold.
+    assert.equal(
+      (
+        await app.call(
+          "/api/admin/inventory/VAR-HOODIE-L/movements",
+          "POST",
+          { type: "entry", qty: 20, reason: "Conteo sintético" },
+        )
+      ).status,
+      201,
+    );
     const draft = (await settings(app)).settings;
     Object.assign(draft, {
       enabled: true,
@@ -383,6 +394,17 @@ test("Cambiar la configuración invalida tarifas anteriores sin generar guías",
     },
   });
   try {
+    await app.call("/api/session", "POST", { password });
+    assert.equal(
+      (
+        await app.call(
+          "/api/admin/inventory/VAR-HOODIE-M/movements",
+          "POST",
+          { type: "entry", qty: 20, reason: "Conteo sintético" },
+        )
+      ).status,
+      201,
+    );
     const items = [{ size: "M", qty: 1 }],
       rates = await app.call("/api/shipping/rates", "POST", {
         items,

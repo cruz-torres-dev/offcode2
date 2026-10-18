@@ -1,0 +1,60 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="referrer" content="no-referrer"><title>Contacto — OFFCODE</title><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="account.css"></head><body>    <header id="top" class="simple-header">
+      <button id="menu-toggle" aria-expanded="false" aria-controls="main-nav">
+        Menú <span>＋</span>
+      </button>
+      <nav id="main-nav" aria-label="Principal">
+        <a href="index.html#collection">Colección</a><a href="index.html#editorial">Campaña</a
+        ><a
+          href="https://www.instagram.com/offcode_tm/"
+          target="_blank"
+          rel="noopener"
+          >Instagram ↗</a
+        >
+      </nav>
+      <div class="brand">
+        <a href="index.html" aria-label="OFFCODE — inicio"
+          ><img
+            class="logo-static"
+            src="assets/monogram-static.png"
+            alt="OFFCODE, monograma Of"
+            width="170"
+            height="104" /><model-viewer
+            id="logo-model"
+            data-finish="silver"
+            src="assets/offcode-original.glb"
+            alt="Monograma original Of en tres dimensiones"
+            auto-rotate
+            auto-rotate-delay="0"
+            rotation-per-second="60deg"
+            camera-orbit="0deg 90deg 58m"
+            camera-target="0m 0m 0m"
+            field-of-view="30deg"
+            exposure="1.2"
+            shadow-intensity="0"
+            environment-image="neutral"
+            interaction-prompt="none"
+            loading="eager"
+            reveal="auto"
+            aria-hidden="true"
+          ></model-viewer></a
+        ><button
+          id="motion"
+          aria-pressed="false"
+          aria-label="Pausar giro del monograma"
+        >
+          Pausar giro
+        </button>
+      </div>
+      <div class="header-actions">
+      <button id="account-toggle" type="button" aria-label="Abrir tu cuenta" aria-haspopup="dialog" aria-controls="account-dialog">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7.5" r="3.2"/><path d="M5.5 20v-2a6.5 6.5 0 0 1 13 0v2Z"/></svg>
+      </button>
+      <a href="index.html#cart" class="header-bag-link" aria-label="Abrir bolsa de compra">        <svg class="bag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <rect x="5" y="7.5" width="14" height="13" rx="2" />
+          <path d="M9 8V6a3 3 0 0 1 6 0v2" />
+        </svg>
+<span data-bag-count aria-hidden="true">0</span></a>
+      </div>
+    </header>
+<main class="account-page"><p class="eyebrow">OFFCODE / CONTACTO</p><h1>Hablemos.</h1><p>Comparte tu consulta con el equipo de la tienda.</p>
+<form id="contact-form" class="account-form"><label>Tu correo<input name="email" type="email" autocomplete="email" maxlength="254" required></label><label>Mensaje<textarea name="message" rows="7" minlength="10" maxlength="2000" required></textarea></label><label class="contact-honeypot" aria-hidden="true">Sitio web<input name="website" tabindex="-1" autocomplete="off"></label><label><input name="consent" type="checkbox" required> Acepto compartir este correo y mensaje con OFFCODE y su proveedor de correo para atender mi consulta.</label><button class="account-primary" type="submit">Enviar consulta</button></form><p id="contact-status" role="status" aria-live="polite"></p><a href="index.html">Volver a la tienda ↗</a></main><dialog id="account-dialog" aria-labelledby="account-title"><div id="account-root"></div></dialog><script type="module" src="contact.js"></script><script type="module" src="account.js"></script><script type="module" src="logo.js"></script><script type="module" src="public-header.js"></script></body></html>

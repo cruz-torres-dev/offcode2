@@ -176,7 +176,20 @@ async function start(mock, options = {}) {
   };
   return { ...app, call, base };
 }
+// Stock must be counted before a size can be sold; tests never invent stock.
+// The helper leaves no owner session behind so unauthenticated assertions hold.
+async function countedStock(app, size = "M", qty = 20) {
+  assert.equal((await app.call("/api/session", "POST", { password })).status, 200);
+  const result = await app.call(
+    `/api/admin/inventory/VAR-HOODIE-${size}/movements`,
+    "POST",
+    { type: "entry", qty, reason: "Conteo sintético" },
+  );
+  assert.equal(result.status, 201, JSON.stringify(result.data));
+  await app.call("/api/logout", "POST", {});
+}
 async function createOrder(app) {
+  await countedStock(app);
   const rates = await app.call("/api/shipping/rates", "POST", {
     items,
     customer,
@@ -219,6 +232,7 @@ test("FedEx exclusivo: cotización ligada a datos, total del servidor, compra pr
   const mock = provider(),
     app = await start(mock);
   try {
+    await countedStock(app);
     const publicConfig = await app.call("/api/config");
     assert.equal(publicConfig.data.shipping.carrier, "FedEx");
     assert.ok(!JSON.stringify(publicConfig).includes("synthetic-envia-token"));
@@ -465,6 +479,7 @@ test("Envia: sin cobertura, meta:error HTTP200 y estado inválido nunca producen
   const mock = provider(),
     app = await start(mock);
   try {
+    await countedStock(app);
     mock.noCoverage = true;
     assert.equal(
       (
@@ -505,6 +520,7 @@ test("Caducidad y recuperación de intento interrumpido: no se compra de nuevo s
   const mock = provider();
   let app = await start(mock, { databasePath });
   try {
+    await countedStock(app);
     const quotes = await app.call("/api/shipping/rates", "POST", {
       items,
       customer,

@@ -9,7 +9,7 @@ La landing VIP se retiró del sitio publicado. Sus fuentes están en `archive/vi
 ## Probar localmente
 
 - Presentación: `python -m http.server 8000 --directory dist`; abrir http://localhost:8000.
-- Servidor: copiar `.env.example` a `.env`, configurar la contraseña privada y ejecutar `npm start`. Node.js **24.14.0** y SQLite integrado en Node (aviso experimental). Ejecutar `npm ci` para validar el lockfile; no hay dependencias externas ni compilación.
+- Servidor: copiar `.env.example` a `.env`, configurar la contraseña privada y ejecutar `npm start`. Node.js **24.14.0** y SQLite integrado en Node (aviso experimental). Ejecutar `npm ci` para validar el lockfile; no hay dependencias externas de autenticación ni compilación.
 - Flujo ficticio completo: `npm run preview:shipping`; abrir http://127.0.0.1:8013. Contraseña del panel de esta vista: **solo-pruebas-fedex-ficticias**. Datos en memoria, sin llamadas a Envia ni guías reales. Detener con Ctrl+C.
 - Pruebas: `npm test`.
 - Correo transaccional opcional: desactivado por defecto (`EMAIL_ENABLED=false`). Configuración, DNS y prueba controlada en [OPERACION.md](OPERACION.md#correo-transaccional-resend).
@@ -38,11 +38,11 @@ Sigue [OPERACION.md](OPERACION.md) antes de habilitar ventas. El propietario pue
 - `archive/vip/`: respaldo de la landing anterior; no se publica.
 - `qa/`: capturas e informes de pruebas, fuera del sitio publicado.
 
-## Ficha de la prenda y guía de tallas (17 de octubre de 2026)
+## Ficha de la prenda (17 de octubre de 2026)
 
 La ficha publica solo datos comerciales confirmados: **hoodie oversize**, **negro**, **100% algodón**, **420 g/m²** y temporada **SS 2026**. El documento de confección del cliente es confidencial y no se copió al repositorio, a `dist/`, a Git ni al despliegue.
 
-El botón "Guía de tallas y medidas" abre un diálogo con las seis tallas contempladas (XS–XXL) y su disponibilidad real, que ahora sale del catálogo administrado: hoy S, M, L y XL; XS y XXL aparecen como "Por confirmar" y el servidor las rechaza, y una talla agotada se muestra como "Agotado". **No hay tabla de centímetros** porque el documento no incluye medidas y no se inventan. La estructura para añadirlas y publicar el tiempo de preparación sigue en `server/catalog.mjs`, sin tocar HTML ni CSS. Ver [OPERACION.md](OPERACION.md#ficha-de-la-prenda-y-guía-de-tallas).
+La marca no entregará la tabla de medidas ni un tiempo de preparación, así que **no hay guía de tallas** ni tabla de centímetros ni promesa de plazo: nada de eso se inventa. El selector ofrece solo las tallas vendibles del catálogo administrado (hoy S, M, L y XL); XS y XXL no tienen variante y el servidor las rechaza, y una talla agotada se muestra como "Agotado". Ver [OPERACION.md](OPERACION.md#ficha-de-la-prenda).
 
 El envío sigue siendo exclusivamente FedEx a través de Envia: cotización filtrada por transportista, selección antes de confirmar, tarifa validada en el servidor y estimado de entrega solo si FedEx lo devuelve. El pedido guarda transportista, servicio, tarifa y estimado; el rastreo se guarda al generar una guía real. La consulta automática de seguimiento y cualquier promesa de plazo siguen pendientes de confirmar con la cuenta real.
 
@@ -56,7 +56,7 @@ El inventario es por variante: `disponible = existencias físicas − reservadas
 
 Al crear un pedido el servidor valida variante, precio y stock, y reserva las unidades dentro de una transacción SQLite. Reservar no es cobrar ni descontar: el descuento ocurre una sola vez al marcar el pago, y cancelar libera la reserva. Dos compradores por la última unidad no pueden quedarse ambos con ella. La caducidad de reservas no está implementada y no se inventó un plazo.
 
-La tienda consume el catálogo administrado: solo se ofrecen las tallas con variante activa, las agotadas aparecen deshabilitadas con la leyenda "Agotado" y el precio sale del catálogo. La guía de tallas muestra la disponibilidad real y la bolsa se vuelve a validar en el servidor.
+La tienda consume el catálogo administrado: solo se ofrecen las tallas con variante activa, las agotadas aparecen deshabilitadas con la leyenda "Agotado" y el precio sale del catálogo. La bolsa se vuelve a validar en el servidor.
 
 Migraciones versionadas con `PRAGMA user_version`, idempotentes y transaccionales; la ruta de la base de datos no cambia. Detalle de tablas, estados, movimientos, límites y pasos de activación: [OPERACION.md](OPERACION.md#catálogo-administrable-inventario-y-migraciones).
 
@@ -66,7 +66,7 @@ SQLite es la única base de datos, mediante `node:sqlite`. La interfaz asíncron
 
 Localmente se usa `DATABASE_PATH=./data/offcode.sqlite`. En Render debe ser `/var/data/offcode.sqlite`, con disco persistente montado en `/var/data`. El servidor crea el directorio privado si falta y rechaza rutas dentro de `dist/`. En el arranque normal de Render exige la ruta explícita: no elige una base local vacía silenciosamente. Un selector de motor antiguo incompatible se rechaza antes de abrir la base; no se cambia ninguna variable privada desde este repositorio.
 
-Las migraciones SQLite conservan `PRAGMA user_version=1`, crean las estructuras que falten y no duplican productos ni movimientos. Solo si la versión anterior es menor y `products` está vacía se siembra la hoodie, sin existencias configuradas. Un esquema más reciente se rechaza sin modificar tablas. No se borra ni reemplaza una base existente.
+Las migraciones SQLite conservan `PRAGMA user_version=2`, crean las estructuras que falten y no duplican productos ni movimientos. Solo si la versión anterior es menor que 1 y `products` está vacía se siembra la hoodie, sin existencias configuradas. Un esquema más reciente se rechaza sin modificar tablas. No se borra ni reemplaza una base existente.
 
 Comprobaciones locales: `npm ci`, `npm test`, `npm run check:load`. El servidor existente es **offcode2**, rama **main**, dominio **https://offcode.mx**, según el propietario. El disco y la configuración real no se comprobaron desde esta tarea. Pasos manuales: [OPERACION.md](OPERACION.md#sqlite-y-persistencia-en-render).
 
@@ -143,7 +143,7 @@ Esta versión utiliza SQLite y una instancia en Render. Un servicio con disco no
 
 ## Verificación actual
 
-**58 pruebas automáticas aprobadas con Node 24.14.0, sin omisiones.** Incluyen pedidos, catálogo administrable, inventario y reservas, VIP archivado/API de datos conservada, FedEx exclusivo, bloqueo de compra duplicada, recuperación tras reinicio, raíz de tienda, caché pública, configuración cifrada, token oculto, cambio de contraseña, invalidación de tarifas, búsqueda de pedidos en todas las páginas, URL inicial automática de Render, esquema completo e idempotente, dos compradores simultáneos por la última unidad, reversión de transacciones, ciclo reserva–cobro–cancelación, rutas privadas, aislamiento de transacciones pausadas y rechazo de motores incompatibles sin filtrar credenciales. No se realizaron pagos ni compras de guías reales.
+**La suite se ejecuta con Node 24.14.0; el resultado de la revisión más reciente está en qa/viewer-final/README.md.** Incluyen pedidos, catálogo administrable, inventario y reservas, VIP archivado/API de datos conservada, FedEx exclusivo, bloqueo de compra duplicada, recuperación tras reinicio, raíz de tienda, caché pública, configuración cifrada, token oculto, cambio de contraseña, invalidación de tarifas, búsqueda de pedidos en todas las páginas, URL inicial automática de Render, esquema completo e idempotente, dos compradores simultáneos por la última unidad, reversión de transacciones, ciclo reserva–cobro–cancelación, rutas privadas, aislamiento de transacciones pausadas y rechazo de motores incompatibles sin filtrar credenciales. No se realizaron pagos ni compras de guías reales.
 
 Prueba de carga local del 17 de octubre de 2026: 600 peticiones al catálogo y recursos con concurrencia 50, 120 solicitudes de pedido con concurrencia 20 y 120 reintentos. Cero respuestas de error y exactamente 120 pedidos únicos guardados. El reporte identifica tiempos y alcance. **Son solicitudes HTTP en loopback, no visitantes ni capacidad certificada de Render.** No incluye tiempos ni límites reales de Envia, CDN, conexión móvil o carga de renderizado 3D en teléfonos.
 
@@ -157,6 +157,15 @@ Cambios principales de esta etapa: `dist/settings.html`, `dist/settings.js`, nav
 
 ## Revisión antes de publicar
 
-La entrega incluye un commit local con el mensaje `Use SQLite with persistent Render storage`. No ejecuta push ni despliegue. Revisa `git status`, `git show --stat HEAD` y `git remote -v` antes de decidir publicarlo; el remoto esperado es `https://github.com/cruz-torres-dev/offcode2.git`.
+La etapa SQLite anterior creó un commit local con el mensaje `Use SQLite with persistent Render storage`. No ejecuta push ni despliegue. Revisa `git status`, `git show --stat HEAD` y `git remote -v` antes de decidir publicarlo; el remoto esperado es `https://github.com/cruz-torres-dev/offcode2.git`.
 
 Un push a main puede activar el despliegue automático del servicio existente. Verifica primero las comprobaciones de almacenamiento descritas en OPERACION.md. No subas `.env`, claves, datos bancarios completados, bases SQLite/WAL/SHM, journals, exportaciones, TECH PACK confidencial ni ZIP de despliegue.
+
+
+## Header, portada y cuentas de clientes
+
+El header negro incorpora cuenta de cliente, conserva la bolsa y centra el monograma original. La foto adjunta se incorpora en el panel derecho, con JPEG/WebP optimizados y dos retratos apilados en móvil. Registro, verificación, login, recuperación, perfil y pedidos propios viven en SQLite, separados del propietario. El acceso es exclusivamente por correo y contraseña; Contacto reutiliza Resend.
+
+La verificación y recuperación requieren configurar Resend privadamente y comprobar la entrega real. Los pasos y las variables retiradas que el propietario puede quitar manualmente de Render están en [CUENTAS.md](CUENTAS.md). Esta etapa queda sin commit, push ni despliegue.
+
+La galería toma las imágenes del producto publicado, con miniaturas WebP, visor amplio, zoom 2×, arrastre, controles de teclado y gestos táctiles. Recursos locales y pruebas de esta revisión: [qa/accounts/README.md](qa/accounts/README.md). No se sobrescriben las asociaciones de imágenes de bases existentes: la nueva foto de empaque puede añadirse desde Productos con `assets/product-packaging.jpg`.

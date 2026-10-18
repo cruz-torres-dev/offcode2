@@ -37,6 +37,17 @@ async function start(email = {}, databasePath = ":memory:") {
 const forbidden = [env.RESEND_API_KEY, customer.street, customer.name, customer.phone, customer.notes, bank.name, bank.beneficiary, bank.clabe];
 function noSensitive(value) { for (const secret of forbidden) assert.ok(!JSON.stringify(value).includes(secret), secret); }
 
+// A size is only sellable once its stock is counted; tests never invent stock.
+// The helper leaves no owner session behind so unauthenticated assertions hold.
+async function countedStock(app, qty = 40) {
+  assert.equal((await app.call("/api/session", "POST", { password })).status, 200);
+  const result = await app.call("/api/admin/inventory/VAR-HOODIE-M/movements", "POST", {
+    type: "entry", qty, reason: "Conteo sintético",
+  });
+  assert.equal(result.status, 201, JSON.stringify(result.data));
+  await app.call("/api/logout", "POST", {});
+}
+
 test("Correo desactivado por defecto, configuración incompleta e inyección de cabeceras", async () => {
   for (const config of [{}, { ...env, EMAIL_ENABLED: "false" }, { ...env, EMAIL_FROM: "" }, { ...env, ORDER_NOTIFICATION_EMAIL: "" }]) {
     const t = createEmailTransport({ env: config, fetcher: () => { throw Error("Must not call"); } });
@@ -46,6 +57,7 @@ test("Correo desactivado por defecto, configuración incompleta e inyección de 
   assert.equal(validEmail("buyer@example.test\r\nBcc: evil@example.test"), false);
   const app = await start({ env: {} });
   try {
+    await countedStock(app);
     const r = await app.call("/api/orders", "POST", request());
     assert.equal(r.status, 201);
     await app.email.drain();
@@ -60,6 +72,7 @@ test("Pedido único: propietario y comprador; transiciones confirmadas; API priv
   const app = await start();
   try {
     assert.equal((await app.call("/api/admin/email-notifications?orderId=missing")).status, 401);
+    await countedStock(app);
     const input = request();
     const created = await app.call("/api/orders", "POST", input);
     assert.equal(created.status, 201);
@@ -118,6 +131,7 @@ test("Error del proveedor no pierde ni duplica pedidos; reintento privado usa id
     return failing ? new Response(JSON.stringify({ error: env.RESEND_API_KEY + customer.street }), { status: 503 }) : accepted();
   } });
   try {
+    await countedStock(app);
     const input = request();
     const created = await app.call("/api/orders", "POST", input);
     await app.email.drain();
@@ -165,6 +179,7 @@ test("Journal durable: reinicio no duplica, reanuda incertidumbre y bloquea rein
   } };
   try {
     app = await start(options, dbPath);
+    await countedStock(app);
     const created = await app.call("/api/orders", "POST", request());
     await app.email.drain();
     await app.email.drain();
@@ -224,6 +239,7 @@ test("El pedido responde sin esperar al proveedor y las plantillas escapan el HT
   let release;
   const app = await start({ fetcher: () => new Promise((resolve) => { release = () => resolve(accepted()); }) });
   try {
+    await countedStock(app);
     const created = await app.call("/api/orders", "POST", request());
     const sending = app.email.drain();
     assert.equal(app.email.list(created.data.id)[0].state, "sending");

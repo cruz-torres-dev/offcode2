@@ -41,6 +41,7 @@ async function seedHoodie(db, at) {
     ["assets/product-front.jpg", "Frente de la sudadera LA AFRO × OFFCODE"],
     ["assets/product-back.jpg", "Espalda de la sudadera LA AFRO × OFFCODE"],
     ["assets/product-detail.jpg", "Detalle de los gráficos y capucha de la sudadera"],
+    ["assets/product-packaging.jpg", "Sudadera y empaque original LA AFRO × OFFCODE"],
   ];
   for (const [index, [src, alt]] of images.entries())
     await db.run(
@@ -73,7 +74,7 @@ export async function migrate(db, { now = () => new Date().toISOString(), seed =
     if (current > SCHEMA_VERSION) throw Error("El esquema SQLite es más reciente que esta aplicación. Revisa la versión antes de iniciar.");
     for (const statement of schemaStatements()) await tx.exec(statement);
     if (current < SCHEMA_VERSION) {
-      if (seed) await seedHoodie(tx, now());
+      if (current < 1 && seed) await seedHoodie(tx, now());
       await tx.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     }
     return SCHEMA_VERSION;

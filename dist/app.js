@@ -15,8 +15,8 @@ const cartDialog = $("#cart");
 let variantsBySize = new Map();
 let productId = null;
 
-// Sizes and measurements come from the server so the guide cannot drift from
-// what the order endpoint actually accepts. Static markup stays usable without JS.
+// Sizes come from the server so the storefront cannot drift from what the
+// order endpoint actually accepts. Static markup stays usable without JS.
 function applyProduct(product) {
   if (!product || !Array.isArray(product.sizes) || !product.sizes.length) return;
   const saleSizes = Array.isArray(product.saleSizes) && product.saleSizes.length
@@ -24,6 +24,7 @@ function applyProduct(product) {
     : product.sizes.filter((s) => s.available).map((s) => s.code);
   const byCode = new Map(product.sizes.map((item) => [item.code, item]));
   productId = product.id ?? null;
+  document.dispatchEvent(new CustomEvent("offcode:product", { detail: product }));
   variantsBySize = new Map(
     product.sizes
       .filter((item) => item.variantId)
@@ -34,9 +35,10 @@ function applyProduct(product) {
   for (const button of buttons) {
     const code = button.dataset.size;
     const item = byCode.get(code);
-    // A size without a variant is not offered; a sold-out variant stays
-    // visible but disabled, so nobody thinks it was removed by mistake.
-    const offered = item ? item.variantId !== null : saleSizes.includes(code);
+    // Only sizes with counted stock are offered. A sold-out variant stays
+    // visible but disabled, so nobody thinks it was removed by mistake; a size
+    // with unknown stock (never counted) is hidden instead of shown as sold out.
+    const offered = item ? item.sellable === true : saleSizes.includes(code);
     const soldOut = Boolean(item?.soldOut);
     if (soldOut) soldOutSizes.push(code);
     button.hidden = !offered;
@@ -62,66 +64,6 @@ function applyProduct(product) {
       button.setAttribute("aria-pressed", String(active));
     }
   }
-  const rows = new Map(
-    [...document.querySelectorAll("[data-guide-size]")].map((row) => [
-      row.dataset.guideSize,
-      row,
-    ]),
-  );
-  for (const item of product.sizes) {
-    const row = rows.get(item.code);
-    if (!row) continue;
-    const cell = row.querySelector("[data-guide-status]");
-    if (!cell) continue;
-    cell.textContent = item.soldOut
-      ? "Agotado"
-      : item.available
-        ? "Disponible"
-        : "Por confirmar";
-    cell.classList.toggle("is-available", Boolean(item.available));
-  }
-  const fields = product.measurements?.fields ?? [];
-  const values = product.measurements?.rows ?? {};
-  const codes = product.sizes.map((s) => s.code).filter((code) => values[code]);
-  const host = $("#guide-measures-table");
-  const note = $("#guide-measures-note");
-  if (!host || !note) return;
-  if (!codes.length || !fields.length) return;
-  const table = document.createElement("table");
-  table.className = "guide-table";
-  const caption = document.createElement("caption");
-  caption.textContent = `Medidas verificadas (${product.measurements.unit})`;
-  const head = document.createElement("thead");
-  const headRow = document.createElement("tr");
-  headRow.append(document.createElement("th"));
-  headRow.firstChild.scope = "col";
-  headRow.firstChild.textContent = "Talla";
-  for (const field of fields) {
-    const th = document.createElement("th");
-    th.scope = "col";
-    th.textContent = field.label;
-    headRow.append(th);
-  }
-  head.append(headRow);
-  const tbody = document.createElement("tbody");
-  for (const code of codes) {
-    const tr = document.createElement("tr");
-    const th = document.createElement("th");
-    th.scope = "row";
-    th.textContent = code;
-    tr.append(th);
-    for (const field of fields) {
-      const td = document.createElement("td");
-      const value = values[code]?.[field.key];
-      td.textContent = Number.isFinite(value) ? String(value) : "—";
-      tr.append(td);
-    }
-    tbody.append(tr);
-  }
-  table.append(caption, head, tbody);
-  host.replaceChildren(table);
-  host.hidden = false;
-  note.hidden = true;
 }
 
 document.querySelectorAll("[data-size]").forEach((b) =>
@@ -134,7 +76,6 @@ document.querySelectorAll("[data-size]").forEach((b) =>
     });
   }),
 );
-$("#size-guide-open").onclick = () => $("#size-guide").showModal();
 function renderCart() {
   const itemCount = cart.reduce((n, p) => n + p.qty, 0);
   $("#count").textContent = String(itemCount);
@@ -207,51 +148,13 @@ $("#bag").onclick = () => {
   renderCart();
   cartDialog.showModal();
 };
-const zoomViewport = $("#zoom-viewport");
-const zoomToggle = $("#zoom-toggle");
-let zoomed = false;
-let zoomDrag = null;
-function setProductZoom(enabled) {
-  zoomed = enabled;
-  zoomViewport.classList.toggle("is-zoomed", enabled);
-  zoomToggle.setAttribute("aria-pressed", String(enabled));
-  zoomToggle.setAttribute("aria-label", enabled ? "Restablecer fotografía" : "Acercar fotografía al doble");
-  zoomToggle.querySelector("span").textContent = enabled ? "Restablecer 1×" : "Acercar 2×";
-  $("#zoom-help").textContent = enabled ? "Arrastra o desliza para recorrer la foto. Con teclado, enfoca la imagen y usa las flechas." : "Acerca la foto para ver los detalles.";
-  zoomViewport.scrollLeft = enabled ? (zoomViewport.scrollWidth - zoomViewport.clientWidth) / 2 : 0;
-  zoomViewport.scrollTop = enabled ? (zoomViewport.scrollHeight - zoomViewport.clientHeight) / 2 : 0;
-}
-zoomToggle.onclick = () => setProductZoom(!zoomed);
-zoomViewport.addEventListener("pointerdown", (event) => {
-  if (!zoomed || event.pointerType !== "mouse" || event.button !== 0) return;
-  zoomDrag = { x: event.clientX, y: event.clientY, left: zoomViewport.scrollLeft, top: zoomViewport.scrollTop };
-  zoomViewport.setPointerCapture(event.pointerId);
-  zoomViewport.classList.add("is-dragging");
-  zoomViewport.focus({ preventScroll: true });
-  event.preventDefault();
-});
-zoomViewport.addEventListener("pointermove", (event) => {
-  if (!zoomDrag) return;
-  zoomViewport.scrollLeft = zoomDrag.left + zoomDrag.x - event.clientX;
-  zoomViewport.scrollTop = zoomDrag.top + zoomDrag.y - event.clientY;
-});
-function endZoomDrag() { zoomDrag = null; zoomViewport.classList.remove("is-dragging"); }
-zoomViewport.addEventListener("pointerup", endZoomDrag);
-zoomViewport.addEventListener("pointercancel", endZoomDrag);
-zoomViewport.addEventListener("lostpointercapture", endZoomDrag);
-$("#product-modal").addEventListener("close", () => {
-  endZoomDrag();
-  setProductZoom(false);
-  $("#product-open").focus({ preventScroll: true });
-});
-$("#product-open").onclick = () => {
-  const p = photos[photoIndex];
-  $("#zoom-image").src = p.src;
-  $("#zoom-image").alt = p.alt;
-  $("#product-modal").showModal();
-  setProductZoom(false);
+// Public subpages navigate here to reuse the existing bag and its state.
+const openLinkedBag = () => {
+  if (location.hash === "#cart" && !cartDialog.open) $("#bag").click();
 };
-document.querySelectorAll("dialog").forEach((d) => {
+addEventListener("hashchange", openLinkedBag);
+queueMicrotask(openLinkedBag);
+document.querySelectorAll("dialog:not(#account-dialog)").forEach((d) => {
   d.querySelector(".close").onclick = () => d.close();
   d.addEventListener("click", (e) => {
     if (e.target === d) {
@@ -283,46 +186,6 @@ $("#checkout").onclick = () => {
 };
 renderCart();
 
-const photos = [
-  {
-    src: "assets/product-front.jpg",
-    label: "FRENTE",
-    alt: "Frente de la sudadera LA AFRO × OFFCODE",
-  },
-  {
-    src: "assets/product-back.jpg",
-    label: "ESPALDA",
-    alt: "Espalda de la sudadera LA AFRO × OFFCODE",
-  },
-  {
-    src: "assets/product-detail.jpg",
-    label: "DETALLE",
-    alt: "Detalle de los gráficos y capucha de la sudadera",
-  },
-];
-let photoIndex = 0;
-function showPhoto(i) {
-  photoIndex = (i + photos.length) % photos.length;
-  const p = photos[photoIndex];
-  $("#gallery-main").src = p.src;
-  $("#gallery-main").alt = p.alt;
-  $("#photo-label").textContent =
-    String(photoIndex + 1).padStart(2, "0") + " / " + p.label;
-  $("#product-open").setAttribute(
-    "aria-label",
-    "Ampliar fotografía del producto: " + p.label.toLowerCase(),
-  );
-  document.querySelectorAll("[data-photo]").forEach((b) => {
-    const active = Number(b.dataset.photo) === photoIndex;
-    b.classList.toggle("active", active);
-    b.setAttribute("aria-pressed", String(active));
-  });
-}
-document
-  .querySelectorAll("[data-photo]")
-  .forEach((b) => (b.onclick = () => showPhoto(Number(b.dataset.photo))));
-$("#photo-prev").onclick = () => showPhoto(photoIndex - 1);
-$("#photo-next").onclick = () => showPhoto(photoIndex + 1);
 function readQty() {
   const n = Number($("#quantity").value);
   const q = Number.isFinite(n) ? Math.max(1, Math.min(99, Math.floor(n))) : 1;
@@ -352,14 +215,7 @@ document
   .forEach((a) => a.addEventListener("click", closeMenu));
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeMenu();
-  if ($("#product-modal").open) {
-    if (zoomed && e.target === zoomViewport) return;
-    if (e.key === "ArrowRight") showPhoto(photoIndex + 1);
-    if (e.key === "ArrowLeft") showPhoto(photoIndex - 1);
-    const p = photos[photoIndex];
-    $("#zoom-image").src = p.src;
-    $("#zoom-image").alt = p.alt;
-  }
+
 });
 const video = $("#campaign-video"),
   videoButton = $("#video-toggle");
@@ -398,10 +254,6 @@ fetch("/api/config")
     for (const [id, value] of [
       ["footer-privacy", config.privacyUrl],
       ["footer-terms", config.termsUrl],
-      [
-        "footer-contact",
-        config.whatsapp ? "https://wa.me/" + config.whatsapp : "",
-      ],
     ]) {
       if (!value) continue;
       try {
@@ -425,10 +277,11 @@ fetch("/api/config")
     }
     if (!config.enabled) return;
     ordersEnabled = true;
-    const saleSizes =
-      Array.isArray(config.product?.saleSizes) && config.product.saleSizes.length
-        ? config.product.saleSizes
-        : FALLBACK_SALE_SIZES;
+    // Trust the server list even when empty: a store with no counted stock must
+    // not resurrect a saved bag from a fixed fallback.
+    const saleSizes = Array.isArray(config.product?.saleSizes)
+      ? config.product.saleSizes
+      : FALLBACK_SALE_SIZES;
     try {
       const saved = JSON.parse(sessionStorage.getItem("offcode-bag") || "[]");
       const sizes = new Set(saved.map((p) => p.size));
@@ -464,8 +317,6 @@ fetch("/api/config")
     $("#selection-note").textContent = "— confirma disponibilidad al solicitar";
     $("#product-description").textContent =
       "Hoodie oversize negra de 420 g/m², confeccionada en 100% algodón. Explora las vistas y elige talla y cantidad para solicitar tu pedido.";
-    $("#conditions-text").textContent =
-      "Confirmaremos existencia, costo de envío y total antes de recibir la transferencia. Consulta las condiciones de compra al enviar tu solicitud.";
-    $("#footer-mode").textContent = "OFFCODE · Pedidos por transferencia";
+    $("#footer-mode").textContent = "OFFCODE™ · Hecho para salir del código.";
   })
   .catch(() => {});

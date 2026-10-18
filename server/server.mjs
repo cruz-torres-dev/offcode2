@@ -12,6 +12,7 @@ import {
 } from "node:crypto";
 import { safeUrl } from "./envia.mjs";
 import { clientIp, staticPolicy } from "./http-policy.mjs";
+import { createCustomerAccounts } from "./customer-accounts.mjs";
 import { createEmailOutbox } from "./email-outbox.mjs";
 import { migrate, readSchemaVersion } from "./db.mjs";
 import { openDatabase } from "./database.mjs";
@@ -337,6 +338,9 @@ export async function createApp(options = {}) {
     }
     return token;
   };
+  const accounts = createCustomerAccounts({ db, origin, production, body, send, limit, validateCustomer,
+    ...options.customers,
+  });
   const server = http.createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -358,6 +362,7 @@ export async function createApp(options = {}) {
         if (req.method !== "GET" && req.headers.origin !== origin)
           throw httpError(403, "Origen no autorizado.");
         const ip = clientIp(req, trustRenderProxy);
+        if (await accounts.handle(req, res, url, ip)) return;
         if (route === "/api/config" && req.method === "GET") {
           const product = await catalog.productPayload();
           return send(res, 200, {
@@ -541,6 +546,7 @@ export async function createApp(options = {}) {
             history: [{ at: now, status: "requested" }],
             consent: { at: now, privacyUrl, termsUrl },
           };
+          const shopper = await accounts.current(req);
           // Order row and stock reservation commit together or not at all.
           const duplicate = await catalog.tx(async (exec) => {
             // A concurrent retry may arrive after the preliminary lookup.
@@ -556,6 +562,8 @@ export async function createApp(options = {}) {
               [id, data.requestKey, now, JSON.stringify(order)],
             );
             await catalog.reserve(id, items, exec);
+            if (shopper?.verified_at && customer.email.trim().toLowerCase() === shopper.email)
+              await exec.run("INSERT INTO customer_orders(order_id,customer_id) VALUES(?,?)", [id, shopper.id]);
           });
           if (duplicate) return send(res, 200, { id: duplicate.id, subtotalCents: duplicate.subtotalCents, status: duplicate.status });
           email.capture(order);
@@ -1275,8 +1283,10 @@ export async function createApp(options = {}) {
   return {
     server,
     email,
+    accounts,
     db,
     close: async () => {
+      await accounts.close();
       await email.close();
       return new Promise((resolve) => {
         clearInterval(quoteCleanup);

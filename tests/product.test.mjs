@@ -69,9 +69,26 @@ async function start(email = {}) {
   return { ...app, call, logs };
 }
 
+// A size is only sellable once its stock is counted. Tests configure the four
+// sale sizes explicitly; no stock is ever invented. No owner session is left
+// behind, so unauthenticated assertions keep working.
+async function countedHoodie(app, qty = 20) {
+  assert.equal((await app.call("/api/session", "POST", { password })).status, 200);
+  for (const size of ["S", "M", "L", "XL"]) {
+    const result = await app.call(
+      `/api/admin/inventory/VAR-HOODIE-${size}/movements`,
+      "POST",
+      { type: "entry", qty, reason: "Conteo sintético" },
+    );
+    assert.equal(result.status, 201, JSON.stringify(result.data));
+  }
+  await app.call("/api/logout", "POST", {});
+}
+
 test("Ficha pública: datos confirmados, seis tallas contempladas y cuatro habilitadas", async () => {
   const app = await start();
   try {
+    await countedHoodie(app);
     const { status, data } = await app.call("/api/config");
     assert.equal(status, 200);
     const product = data.product;
@@ -89,16 +106,16 @@ test("Ficha pública: datos confirmados, seis tallas contempladas y cuatro habil
       ["S", "M", "L", "XL"],
     );
     assert.deepEqual(product.saleSizes, ["S", "M", "L", "XL"]);
-    // The tech pack has no measurement table: nothing may be invented here.
-    assert.deepEqual(product.measurements.rows, {});
-    assert.equal(product.measurements.unit, "cm");
-    assert.equal(product.preparation.businessDays, null);
+    // The brand provides no measurement table and no preparation time, so the
+    // API publishes neither of them.
+    assert.equal(product.measurements, undefined);
+    assert.equal(product.preparation, undefined);
     assert.ok(!JSON.stringify(data).includes(emailEnv.RESEND_API_KEY));
     assert.ok(!JSON.stringify(data).includes("synthetic-envia-token"));
     // Only commercial fields are published; no supplier, cost or print details.
     assert.deepEqual(Object.keys(product).sort(), [
-      "color", "composition", "fabricWeightGsm", "fit", "id", "line", "measurements",
-      "name", "preparation", "priceCents", "saleSizes", "season", "sizes",
+      "color", "composition", "fabricWeightGsm", "fit", "id", "images", "line",
+      "name", "priceCents", "saleSizes", "season", "sizes",
     ]);
     // Sizes now come from the managed catalog; the static facts stay as reference.
     assert.match(product.id, /^PRD-/);
@@ -115,6 +132,7 @@ test("Ficha pública: datos confirmados, seis tallas contempladas y cuatro habil
 test("Catálogo: tallas del TECH PACK no habilitadas se rechazan y no crean pedido", async () => {
   const app = await start();
   try {
+    await countedHoodie(app);
     for (const size of ["XS", "XXL", "xs", "m", "XXXL", "", null]) {
       const result = await app.call("/api/orders", "POST", order(size));
       assert.equal(result.status, 400, String(size));
@@ -137,6 +155,7 @@ test("Catálogo: tallas del TECH PACK no habilitadas se rechazan y no crean pedi
 test("Fallo del correo y proveedor de envío no disponible conservan el pedido", async () => {
   const app = await start();
   try {
+    await countedHoodie(app);
     const created = await app.call("/api/orders", "POST", order("M", 2));
     assert.equal(created.status, 201);
     await app.email.drain();
@@ -180,27 +199,16 @@ test("FedEx sin configurar: la cotización se bloquea y el pedido no guarda dato
   }
 });
 
-test("Guía de tallas accesible, sin medidas inventadas y con el selector limitado a la venta", async () => {
+test("Sin guía de tallas ni medidas: el selector se limita a la venta y no se inventan datos", async () => {
   const selectable = [...html.matchAll(/data-size="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(selectable, ["S", "M", "L", "XL"]);
-  assert.match(html, /id="size-guide"/);
-  assert.match(html, /aria-labelledby="size-guide-title"/);
-  assert.match(html, /id="size-guide-open"[\s\S]{0,120}aria-haspopup="dialog"/);
-  assert.match(html, /aria-controls="size-guide"/);
-  const guide = html.slice(html.indexOf('id="size-guide"'));
-  const rows = [...guide.matchAll(/data-guide-size="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(rows, ["XS", "S", "M", "L", "XL", "XXL"]);
-  const statuses = [...guide.matchAll(/data-guide-status[^>]*>([^<]+)</g)].map((m) => m[1].trim());
-  assert.deepEqual(statuses, [
-    "Por confirmar",
-    "Disponible",
-    "Disponible",
-    "Disponible",
-    "Disponible",
-    "Por confirmar",
-  ]);
-  // No centimetre table is published while the brand has not confirmed measurements.
-  assert.match(guide, /id="guide-measures-table" hidden/);
-  assert.doesNotMatch(guide, /\d+\s?(cm|centímetros)\b/i);
-  assert.match(guide, /no mostramos cifras\s+estimadas/i);
+  // The brand provides neither a measurement table nor a preparation time, so
+  // no size guide, centimetre table or handling promise may be published.
+  assert.doesNotMatch(html, /size-guide/);
+  assert.doesNotMatch(html, /guide-measures/);
+  assert.doesNotMatch(html, /data-guide-size/);
+  assert.doesNotMatch(html, /\d+\s?(cm|centímetros)\b/i);
+  assert.doesNotMatch(html, /tiempo de preparación/i);
+  // The sold-out hook stays so the bag still warns about unavailable sizes.
+  assert.match(html, /id="sold-out-note"/);
 });

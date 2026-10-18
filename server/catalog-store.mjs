@@ -72,12 +72,17 @@ export function createCatalogStore(
     );
   };
 
+  // `null` means stock control is not configured yet: the variant exists but the
+  // owner has not counted it, so it is never treated as sellable.
+  const freeStock = (inventory) =>
+    inventory.configured
+      ? Math.max(0, inventory.on_hand - inventory.reserved)
+      : null;
+
   const available = (variant, product, inventory) => {
     if (!variant || variant.status !== "active") return 0;
     if (product.status !== "published") return 0;
-    return inventory.configured
-      ? Math.max(0, inventory.on_hand - inventory.reserved)
-      : null; // null = stock control not configured yet
+    return freeStock(inventory); // number = counted, null = unknown
   };
 
   async function variantView(row, exec = db) {
@@ -185,10 +190,14 @@ export function createCatalogStore(
     return products;
   }
 
+  // Only variants with counted stock above zero are offered. A variant with
+  // unknown stock (`available === null`) is never sellable.
   async function saleSizes() {
     const primary = (await publicCatalog())[0];
     if (!primary) return [];
-    return primary.variants.filter((v) => v.available === null || v.available > 0).map((v) => v.size);
+    return primary.variants
+      .filter((v) => typeof v.available === "number" && v.available > 0)
+      .map((v) => v.size);
   }
 
   // Resolves the browser bag against the database. Price always comes from here.
@@ -232,6 +241,14 @@ export function createCatalogStore(
         throw fail(
           400,
           `Revisa tallas y cantidades (1–99 por talla). Tallas habilitadas: ${sizes.join(", ")}.`,
+        );
+      // Unknown stock is never assumed available: the variant must be counted
+      // before it can be bought, even through a direct API call.
+      const inventory = await inventoryOf(row.id);
+      if (!inventory.configured)
+        throw fail(
+          400,
+          `La talla ${row.size} todavía no tiene existencias confirmadas. No se puede comprar hasta que el inventario esté contado.`,
         );
       if (seen.has(row.id))
         throw fail(400, "Revisa tallas y cantidades (1–99 por talla). Cada talla aparece una vez.");
@@ -283,32 +300,28 @@ export function createCatalogStore(
   async function reserve(orderId, items, exec = db) {
     for (const item of items) {
       const inventory = await inventoryOf(item.variantId, exec);
-      if (inventory.configured) {
-        const free = inventory.on_hand - inventory.reserved;
-        if (item.qty > free)
-          throw fail(
-            409,
-            `Sin stock suficiente para la talla ${item.size}. Actualiza tu bolsa antes de enviar la solicitud.`,
-          );
-        await exec.run(
-          "UPDATE inventory SET reserved = reserved + ?, updated_at=? WHERE variant_id=?",
-          [item.qty, now(), item.variantId],
+      // Defence in depth: the same rule as resolveItems, re-checked inside the
+      // transaction. Unknown stock can never be reserved or sold.
+      if (!inventory.configured)
+        throw fail(
+          409,
+          `La talla ${item.size} todavía no tiene existencias confirmadas. Actualiza tu bolsa antes de enviar la solicitud.`,
         );
-        await movement(item.variantId, "reserve", { reservedDelta: item.qty, orderId }, exec);
-      }
-      // Unconfigured stock: the order is recorded but nothing is reserved, so
-      // activating inventory later never invents a past reservation.
+      const free = inventory.on_hand - inventory.reserved;
+      if (item.qty > free)
+        throw fail(
+          409,
+          `Sin stock suficiente para la talla ${item.size}. Actualiza tu bolsa antes de enviar la solicitud.`,
+        );
+      await exec.run(
+        "UPDATE inventory SET reserved = reserved + ?, updated_at=? WHERE variant_id=?",
+        [item.qty, now(), item.variantId],
+      );
+      await movement(item.variantId, "reserve", { reservedDelta: item.qty, orderId }, exec);
       await exec.run(
         `INSERT OR IGNORE INTO order_reservations(order_id,variant_id,qty,state,created_at,updated_at)
              VALUES(?,?,?,?,?,?)`,
-        [
-          orderId,
-          item.variantId,
-          item.qty,
-          inventory.configured ? "reserved" : "released",
-          now(),
-          now(),
-        ],
+        [orderId, item.variantId, item.qty, "reserved", now(), now()],
       );
     }
   }
@@ -680,8 +693,8 @@ export function createCatalogStore(
     return getProduct(productId);
   }
 
-  // /api/config.product keeps its previous shape so the storefront and the
-  // size guide keep working, but sizes now come from the managed catalog.
+  // /api/config.product keeps its previous shape so the storefront keeps
+  // working, but sizes now come from the managed catalog.
   async function productPayload() {
     const primary = (await publicCatalog())[0] ?? null;
     if (!primary)
@@ -696,24 +709,27 @@ export function createCatalogStore(
         sizes: SIZES.map((code) => ({
           code,
           available: false,
+          sellable: false,
           variantId: null,
           soldOut: false,
           stockConfigured: false,
         })),
         saleSizes: [],
-        measurements: PRODUCT_FACTS.measurements,
-        preparation: { businessDays: PRODUCT_FACTS.preparation.businessDays },
       };
     const bySize = new Map(primary.variants.map((v) => [v.size, v]));
-    // `available === null` means the variant exists but stock control is not
-    // configured yet: it is still sellable, exactly as before this migration.
+    // A variant is only offered when its stock is counted and above zero.
+    // `available === null` (stock unknown) is neither sellable nor "sold out",
+    // so it is hidden rather than shown as sold out.
     const sizes = [...new Set([...SIZES, ...bySize.keys()])].map((code) => {
       const variant = bySize.get(code);
+      const counted = Boolean(variant) && typeof variant.available === "number";
+      const sellable = counted && variant.available > 0;
       return {
         code,
-        available: Boolean(variant) && variant.available !== 0,
+        available: sellable,
+        sellable,
         variantId: variant ? variant.id : null,
-        soldOut: Boolean(variant) && variant.available === 0,
+        soldOut: counted && variant.available === 0,
         stockConfigured: Boolean(variant && variant.stockConfigured),
       };
     });
@@ -727,10 +743,11 @@ export function createCatalogStore(
       fabricWeightGsm: primary.fabricWeightGsm,
       fit: primary.fit,
       priceCents: primary.priceCents,
+      images: primary.images,
       sizes,
-      saleSizes: primary.variants.filter((v) => v.available === null || v.available > 0).map((v) => v.size),
-      measurements: PRODUCT_FACTS.measurements,
-      preparation: { businessDays: PRODUCT_FACTS.preparation.businessDays },
+      saleSizes: primary.variants
+        .filter((v) => typeof v.available === "number" && v.available > 0)
+        .map((v) => v.size),
     };
   }
 

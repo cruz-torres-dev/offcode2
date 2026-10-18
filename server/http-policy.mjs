@@ -21,7 +21,7 @@ export function staticPolicy(relativePath) {
     return "public, max-age=3600, s-maxage=86400, stale-while-revalidate=60";
   if (["index.html", "tienda.html", "teaser.html"].includes(file))
     return "public, max-age=0, s-maxage=60, must-revalidate";
-  if (["styles.css", "app.js", "logo.js", "store-redirect.js", "motion.css", "motion.js"].includes(file))
+  if (["styles.css", "app.js", "gallery.js", "logo.js", "store-redirect.js", "motion.css", "motion.js", "account.css", "account.js", "contact.js", "public-header.js"].includes(file))
     return "public, max-age=0, s-maxage=300, must-revalidate";
   return "no-store";
 }

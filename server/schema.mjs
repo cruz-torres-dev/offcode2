@@ -1,5 +1,5 @@
 // SQLite schema; existing tables are preserved by idempotent migrations.
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export const SCHEMA_NAME = "catalog_and_inventory";
 
 const SQLITE = [
@@ -115,6 +115,31 @@ const SQLITE = [
     PRIMARY KEY(order_id, variant_id)
   )`,
   `CREATE INDEX IF NOT EXISTS order_reservations_variant ON order_reservations(variant_id, state)`,
+  `CREATE TABLE IF NOT EXISTS customers (
+    id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT,
+    verified_at TEXT, name TEXT NOT NULL DEFAULT '', address TEXT, created_at TEXT NOT NULL
+  )`,
+  // Reserved legacy tables: preserve existing records, never consulted by email authentication.
+  `CREATE TABLE IF NOT EXISTS customer_identities (
+    provider TEXT NOT NULL, subject TEXT NOT NULL, customer_id TEXT NOT NULL REFERENCES customers(id),
+    PRIMARY KEY(provider,subject), UNIQUE(provider,customer_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS customer_sessions (
+    token_hash TEXT PRIMARY KEY, customer_id TEXT NOT NULL REFERENCES customers(id), expires INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS customer_sessions_expires ON customer_sessions(expires)`,
+  `CREATE TABLE IF NOT EXISTS customer_tokens (
+    token_hash TEXT PRIMARY KEY, customer_id TEXT NOT NULL REFERENCES customers(id),
+    purpose TEXT NOT NULL CHECK(purpose IN ('verify','reset')), expires INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS customer_oauth (
+    state_hash TEXT PRIMARY KEY, browser_hash TEXT NOT NULL, verifier TEXT NOT NULL,
+    nonce TEXT NOT NULL, expires INTEGER NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS customer_orders (
+    order_id TEXT PRIMARY KEY REFERENCES orders(id), customer_id TEXT NOT NULL REFERENCES customers(id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS customer_orders_customer ON customer_orders(customer_id)`,
 ];
 
 export function schemaStatements() { return SQLITE; }
@@ -122,7 +147,8 @@ export function schemaStatements() { return SQLITE; }
 export const TABLE_ORDER = Object.freeze([
   "owner_auth", "owner_settings", "orders", "vip_members", "shipping_quotes",
   "shipping_jobs", "products", "product_images", "variants", "inventory",
-  "inventory_movements", "order_reservations",
+  "inventory_movements", "order_reservations", "customers", "customer_identities",
+  "customer_sessions", "customer_tokens", "customer_oauth", "customer_orders",
 ]);
 
 export const movementOrder = () => "created_at DESC, rowid DESC";
