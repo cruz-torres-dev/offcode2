@@ -5,7 +5,7 @@ import { mkdtemp, rm, readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createApp } from "../server/server.mjs";
-import { createEmailTransport, renderEmailV1, validEmail } from "../server/email.mjs";
+import { createEmailTransport, renderEmailV1, renderEmailV2, renderOrderEmail, validEmail } from "../server/email.mjs";
 import { createEmailOutbox } from "../server/email-outbox.mjs";
 
 const origin = "http://localhost:8000", password = "synthetic-email-admin-password";
@@ -36,6 +36,56 @@ async function start(email = {}, databasePath = ":memory:") {
 }
 const forbidden = [env.RESEND_API_KEY, customer.street, customer.name, customer.phone, customer.notes, bank.name, bank.beneficiary, bank.clabe];
 function noSensitive(value) { for (const secret of forbidden) assert.ok(!JSON.stringify(value).includes(secret), secret); }
+
+test("Correos de atención: contacto con referencia, rastreo solo al enviar y compatibilidad con plantillas anteriores", () => {
+  const data = { template: 2, event: "paid", audience: "buyer", orderId: "OF-123456ABCDEF", from: env.EMAIL_FROM, to: customer.email,
+    items: [{ size: "M", qty: 1 }], tracking: "123456789012", supportUrl: "https://shop.example.test/contacto.html?pedido=OF-123456ABCDEF" };
+  const paid = renderOrderEmail(data);
+  assert.ok(paid.html.includes(`href="${data.supportUrl}"`)); assert.ok(paid.text.includes(data.supportUrl));
+  assert.doesNotMatch(paid.html + paid.text, /fedextrack/);
+  const shipped = renderEmailV2({ ...data, event: "shipped" });
+  assert.match(shipped.html, /href="https:\/\/www\.fedex\.com\/fedextrack\/\?trknbr=123456789012"/);
+  assert.match(shipped.text, /https:\/\/www\.fedex\.com\/fedextrack\/\?trknbr=123456789012/);
+  noSensitive(shipped);
+  for (const supportUrl of ["javascript:alert(1)", "https://user:password@example.test/help", "http://example.test/help"])
+    assert.doesNotMatch(renderEmailV2({ ...data, supportUrl }).html, /href=/);
+  assert.doesNotMatch(renderEmailV2({ ...data, event: "requested", audience: "owner" }).html, /href=/);
+  assert.deepEqual(renderOrderEmail({ ...data, template: 1 }), renderEmailV1(data), "un trabajo V1 conserva su cuerpo original, sin botones nuevos");
+  assert.throws(() => renderOrderEmail({ ...data, template: 99 }), /unsupported_email_template/);
+});
+
+test("Los nuevos correos conservan referencia, destinatario y cuerpo idénticos al reintentar tras reiniciar", async () => {
+  const folder = await mkdtemp(path.join(os.tmpdir(), "offcode-support-mail-"));
+  let timestamp = Date.now(), failing = true, box;
+  const sent = [];
+  const order = { id: "OF-123456ABCDEF", customer, items: [{ size: "M", qty: 1 }], status: "requested", history: [{ status: "requested" }] };
+  const options = { databasePath: ":memory:", outboxDirectory: folder, listOrders: () => [], env, autoStart: false,
+    now: () => timestamp, logger: () => {}, fetcher: async (_, request) => {
+      sent.push({ key: request.headers["Idempotency-Key"], body: request.body });
+      return failing && JSON.parse(request.body).to[0] === customer.email ? new Response("", { status: 503 }) : accepted();
+    } };
+  try {
+    box = await createEmailOutbox({ ...options, contactUrl: "https://shop.example.test/contacto.html" });
+    box.capture(order); await box.drain(); await box.drain();
+    assert.equal(sent.length, 2);
+    const pendingBuyer = box.list(order.id).find((job) => job.audience === "buyer");
+    assert.equal(pendingBuyer.state, "uncertain");
+    const stored = JSON.parse(await readFile(path.join(folder, pendingBuyer.id + ".json"), "utf8"));
+    assert.equal(stored.data.template, 2);
+    assert.equal(stored.data.supportUrl, "https://shop.example.test/contacto.html?pedido=" + order.id);
+    noSensitive(stored);
+    await box.close(); timestamp += 61e3; failing = false;
+    box = await createEmailOutbox({ ...options, listOrders: () => [order], contactUrl: "https://changed.example.test/contacto.html" });
+    await box.drain();
+    assert.equal(sent.length, 3); assert.deepEqual(sent[1], sent[2]);
+    assert.equal(box.list(order.id).find((job) => job.audience === "buyer").state, "accepted");
+    assert.equal(box.list(order.id).length, 2, "no se vuelven a crear avisos al cambiar el enlace de contacto");
+  } finally {
+    await box?.close();
+    assert.ok(path.resolve(folder).startsWith(path.resolve(os.tmpdir()) + path.sep));
+    await rm(folder, { recursive: true, force: true });
+  }
+});
 
 // A size is only sellable once its stock is counted; tests never invent stock.
 // The helper leaves no owner session behind so unauthenticated assertions hold.

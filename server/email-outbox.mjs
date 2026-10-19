@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, openSync, closeSync, fsyncSync } from "node:fs";
 import path from "node:path";
-import { createEmailTransport, renderEmailV1, validEmail } from "./email.mjs";
+import { createEmailTransport, renderOrderEmail, validEmail } from "./email.mjs";
 
 const events = new Set(["requested", "awaiting_transfer", "paid", "shipped", "delivered", "cancelled"]);
 const windowMs = 23 * 60 * 60 * 1000; // Margin below Resend's 24-hour idempotency retention.
@@ -9,7 +9,7 @@ const windowMs = 23 * 60 * 60 * 1000; // Margin below Resend's 24-hour idempoten
 // Sidecar journal: no change to the database schema, orders or shipping
 // transactions. A single application instance owns this directory, like the
 // SQLite service itself. An explicit directory preserves existing journals.
-export async function createEmailOutbox({ databasePath, outboxDirectory, listOrders, env, fetcher, logger = console.info,
+export async function createEmailOutbox({ databasePath, outboxDirectory, listOrders, contactUrl = "", env, fetcher, logger = console.info,
   now = Date.now, timeoutMs, autoStart = true } = {}) {
   const transport = createEmailTransport({ env, fetcher, timeoutMs });
   const directory = outboxDirectory
@@ -54,13 +54,25 @@ export async function createEmailOutbox({ databasePath, outboxDirectory, listOrd
           const invalid = !validEmail(to) || (entry.status === "shipped" && !order.tracking) ||
             (entry.status === "awaiting_transfer" && !Number.isSafeInteger(order.totalCents));
           const state = baseline || !transport.enabled || invalid ? "skipped" : obsolete ? "superseded" : "pending";
-          // Only whitelisted template facts, never customer name/address/phone/bank/notes.
+          let supportUrl = "";
+          if (audience === "buyer") {
+            try {
+              const url = new URL(contactUrl);
+              if (url.protocol === "https:" && !url.username && !url.password) {
+                url.searchParams.set("pedido", order.id);
+                supportUrl = url.href;
+              }
+            } catch {}
+          }
+          // Only whitelisted template facts and a public support URL. Never
+          // customer name/address/phone/bank/notes or an authenticated URL.
           const data = state === "pending" ? {
-            template: 1, orderId: order.id, event: entry.status, audience,
+            template: 2, orderId: order.id, event: entry.status, audience,
             from: transport.from, to,
             items: order.items.map(({ size, qty }) => ({ size, qty })),
             totalCents: entry.status === "awaiting_transfer" ? order.totalCents : null,
             tracking: entry.status === "shipped" ? order.tracking : "",
+            supportUrl,
           } : null;
           const job = { id, orderId: order.id, event: entry.status, audience, state, attempts: 0,
             code: baseline ? "historical" : !transport.enabled ? transport.reason : invalid ? "invalid_data" : state,
@@ -121,7 +133,7 @@ export async function createEmailOutbox({ databasePath, outboxDirectory, listOrd
         if (job.nextAttempt > now() || (job.state !== "pending" && job.attempts >= 3)) continue;
         job = { ...job, state: "sending", attempts: job.attempts + 1, firstAttempt: job.firstAttempt ?? now() };
         put(job); // Durable BEFORE contacting Resend; restart keeps the same key and facts.
-        const outcome = await transport.send(renderEmailV1(job.data), job.id);
+        const outcome = await transport.send(renderOrderEmail(job.data), job.id);
         put({ ...job, ...outcome, nextAttempt: now() + Math.min(15 * 60e3, 60e3 * 2 ** (job.attempts - 1)),
           ...(outcome.state === "accepted" ? { data: null } : {}) });
         log(outcome.code, jobs.get(job.id));

@@ -83,6 +83,8 @@
 .empty-state { padding:32px 0; border-top:1px solid #303030; margin-top:24px; }
 .empty-state p { font-size:14px; margin:0 0 12px; }
 .empty-state .account-primary { display:inline-flex; align-items:center; justify-content:center; text-align:center; margin-top:16px; padding:0 24px; width:auto; text-decoration:none; }
+.contact-channel { padding:24px 0; border-top:1px solid #303030; }
+.contact-channel .account-primary { display:inline-flex; align-items:center; justify-content:center; padding:12px 20px; text-align:center; text-decoration:none; }
 .address-card { padding:24px 0; border-top:1px solid #303030; }
 .account-confirm { margin-top:16px; padding:16px; border:1px solid #8a3a3a; }
 .account-confirm p { margin:0 0 16px; font-size:12px; line-height:1.7; }

@@ -201,6 +201,7 @@ export async function createApp(options = {}) {
   const catalog = createCatalogStore(db);
   const email = await createEmailOutbox({
     ...options.email,
+    contactUrl: new URL("/contacto.html", origin).href,
     databasePath,
     outboxDirectory:
       options.email?.outboxDirectory ??
@@ -379,6 +380,10 @@ export async function createApp(options = {}) {
           return send(res, 200, {
             enabled,
             whatsapp: enabled ? whatsapp : "",
+            support: {
+              whatsapp: /^\d{10,15}$/.test(whatsapp) ? whatsapp : "",
+              emailEnabled: accounts.emailEnabled,
+            },
             privacyUrl,
             termsUrl,
             unitCents: product.priceCents ?? UNIT_CENTS,

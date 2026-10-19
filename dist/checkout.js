@@ -6,9 +6,19 @@ const money = (cents) =>
 let items = [],
   config,
   key,
-  selectedRate = null;
+  selectedRate = null,
+  orderReference = "";
 const subtotal = () => items.reduce((s, p) => s + p.qty * config.unitCents, 0);
 const form = $("#order-form");
+$("#copy-order-reference").onclick = async () => {
+  if (!orderReference) return;
+  try {
+    await navigator.clipboard.writeText(orderReference);
+    $("#order-copy-status").textContent = "Referencia copiada. Inclúyela al contactar a OFFCODE.";
+  } catch {
+    $("#order-copy-status").textContent = `Tu referencia es ${orderReference}. Puedes seleccionarla y copiarla.`;
+  }
+};
 function clearRates() {
   selectedRate = null;
   $("#shipping-rates").replaceChildren();
@@ -220,7 +230,10 @@ $("#order-form").addEventListener("submit", async (e) => {
     });
     const result = await response.json();
     if (!response.ok) throw Error(result.error || "No se pudo guardar.");
+    if (!/^OF-[A-F0-9]{12}$/.test(result.id ?? "")) throw Error("No pudimos confirmar la referencia de la solicitud.");
+    orderReference = result.id;
     $("#order-reference").textContent = "Tu referencia: " + result.id;
+    $("#support-order").href = "contacto.html?pedido=" + encodeURIComponent(result.id);
     $("#whatsapp-order").href =
       "https://wa.me/" +
       config.whatsapp +

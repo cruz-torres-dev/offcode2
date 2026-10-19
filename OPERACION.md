@@ -156,6 +156,14 @@ El envío de correos es **opcional y está desactivado por defecto**. Sin config
 
 El código vive en `server/email.mjs` (transporte y plantillas) y `server/email-outbox.mjs` (cola durable). No hay dependencias nuevas: usa `fetch` de Node 24.
 
+### Atención al comprador por WhatsApp y correo
+
+Cada pedido del panel incluye **Atención al comprador** con un mensaje preparado para su estado actual: solicitud, transferencia, pago verificado, envío, entrega o cancelación. Se puede copiar o abrir en WhatsApp; el vendedor revisa el destinatario y envía el mensaje. Abrir o copiar no lo envía ni modifica el estado del pedido. Los datos bancarios se toman de la cuenta guardada al confirmar el total. Un paquete pagado con guía generada sigue en preparación; el aviso de envío aparece después de registrar la entrega física a FedEx.
+
+`contacto.html?pedido=OF-…` conserva la referencia para WhatsApp y el formulario de correo. El soporte por WhatsApp permanece disponible con pedidos cerrados si el vendedor ya guardó su número. El formulario de correo se muestra cuando su transporte está configurado. La consulta por correo llega al buzón `ORDER_NOTIFICATION_EMAIL` con la referencia y el correo del comprador como dirección de respuesta; la referencia no permite consultar datos de un pedido sin autenticación.
+
+Los nuevos avisos transaccionales usan plantilla 2: incluyen un enlace HTTPS de atención con la referencia y, al marcar enviado, un enlace de rastreo FedEx cuando el número permite generarlo. No incluyen CLABE, domicilio ni teléfono del comprador. Los trabajos pendientes de plantilla 1 conservan su contenido y clave de idempotencia originales; no se reenvían mensajes ya aceptados ni se activa el correo automáticamente.
+
 ### Variables privadas
 
 - `EMAIL_ENABLED`: `false` por defecto. Solo el valor exacto `true` habilita el envío; es independiente de `ORDERS_ENABLED`. Añadir la clave no activa nada por sí solo.

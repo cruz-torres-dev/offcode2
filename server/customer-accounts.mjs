@@ -516,14 +516,18 @@ export function createCustomerAccounts({ db, origin, production, body, send, lim
       if (data.website) { send(res, 200, { message: "Solicitud recibida." }); return true; }
       requireMail("El correo de Contacto aún no está habilitado. No se envió tu consulta; intenta más tarde.");
       const email = normalizeCustomerEmail(data.email);
+      const orderId = typeof data.orderId === "string" ? data.orderId.trim().toUpperCase() : "";
+      if (orderId && !/^OF-[A-F0-9]{12}$/.test(orderId))
+        throw fail(400, "Revisa la referencia del pedido; debe tener el formato OF- seguido de 12 letras o números.");
       if (data.consent !== true || typeof data.message !== "string" || data.message.trim().length < 10 || data.message.length > 2000)
         throw fail(400, "Escribe un mensaje de 10–2000 caracteres y acepta compartirlo para recibir atención.");
-      const result = await mail.send({ from: mail.from, to: [mail.owner], reply_to: email, subject: "OFFCODE · Consulta desde Contacto",
-        text: data.message.trim(), html: `<html lang="es"><body style="background:#080808;color:#f5f5f5;padding:32px;font-family:Arial"><h1>OFFCODE · Contacto</h1><p style="white-space:pre-wrap">${escapeHtml(data.message.trim())}</p></body></html>` }, "contact/" + randomUUID());
+      const message = (orderId ? `Referencia del pedido: ${orderId}\n\n` : "") + data.message.trim();
+      const result = await mail.send({ from: mail.from, to: [mail.owner], reply_to: email, subject: "OFFCODE · Consulta desde Contacto" + (orderId ? ` · ${orderId}` : ""),
+        text: message, html: `<html lang="es"><body style="background:#080808;color:#f5f5f5;padding:32px;font-family:Arial"><h1>OFFCODE · Contacto</h1><p style="white-space:pre-wrap">${escapeHtml(message)}</p></body></html>` }, "contact/" + randomUUID());
       if (result.state !== "accepted") throw fail(503, "No pudimos confirmar el envío. Intenta más tarde.");
       send(res, 200, { message: "El proveedor aceptó tu mensaje. La recepción final todavía no está confirmada." }); return true;
     }
     throw fail(404, "Ruta no encontrada.");
   }
-  return { handle, current, async close() { await Promise.allSettled([...pending]); } };
+  return { handle, current, emailEnabled: mail.enabled, async close() { await Promise.allSettled([...pending]); } };
 }

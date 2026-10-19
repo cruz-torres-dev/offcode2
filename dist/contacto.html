@@ -56,5 +56,28 @@
 <span data-bag-count aria-hidden="true">0</span></a>
       </div>
     </header>
-<main class="account-page"><p class="eyebrow">OFFCODE / CONTACTO</p><h1>Hablemos.</h1><p>Comparte tu consulta con el equipo de la tienda.</p>
-<form id="contact-form" class="account-form"><label>Tu correo<input name="email" type="email" autocomplete="email" maxlength="254" required></label><label>Mensaje<textarea name="message" rows="7" minlength="10" maxlength="2000" required></textarea></label><label class="contact-honeypot" aria-hidden="true">Sitio web<input name="website" tabindex="-1" autocomplete="off"></label><label><input name="consent" type="checkbox" required> Acepto compartir este correo y mensaje con OFFCODE y su proveedor de correo para atender mi consulta.</label><button class="account-primary" type="submit">Enviar consulta</button></form><p id="contact-status" role="status" aria-live="polite"></p><a href="index.html">Volver a la tienda ↗</a></main><dialog id="account-dialog" aria-labelledby="account-title"><div id="account-root"></div></dialog><script type="module" src="contact.js"></script><script type="module" src="account.js"></script><script type="module" src="logo.js"></script><script type="module" src="public-header.js"></script></body></html>
+<main class="account-page">
+  <p class="eyebrow">OFFCODE / ATENCIÓN AL COMPRADOR</p>
+  <h1>Hablemos.</h1>
+  <p>¿Tienes una duda sobre tu pedido, pago o envío? Incluye su referencia para que podamos ayudarte.</p>
+  <section id="contact-whatsapp-section" class="contact-channel" hidden>
+    <h2>Por WhatsApp</h2>
+    <p id="contact-order-context"></p>
+    <a id="contact-whatsapp" class="account-primary" target="_blank" rel="noopener noreferrer">Preparar mensaje en WhatsApp ↗</a>
+    <p class="account-note">Se abrirá un mensaje con la referencia del pedido. Revísalo y envíalo cuando estés listo.</p>
+  </section>
+  <section class="contact-channel">
+    <h2>Por correo</h2>
+    <p id="contact-email-status" class="account-note" role="status">Comprobando el canal de atención…</p>
+    <form id="contact-form" class="account-form">
+      <label>Tu correo<input name="email" type="email" autocomplete="email" maxlength="254" required></label>
+      <label>Referencia del pedido (opcional)<input name="orderId" placeholder="OF-…" pattern="OF-[A-Fa-f0-9]{12}" maxlength="15" autocomplete="off"></label>
+      <label>Mensaje<textarea name="message" rows="7" minlength="10" maxlength="2000" required></textarea></label>
+      <label class="contact-honeypot" aria-hidden="true">Sitio web<input name="website" tabindex="-1" autocomplete="off"></label>
+      <label><input name="consent" type="checkbox" required> Acepto compartir este correo y mensaje con OFFCODE y su proveedor de correo para atender mi consulta.</label>
+      <button class="account-primary" type="submit">Enviar consulta</button>
+    </form>
+    <p id="contact-status" role="status" aria-live="polite"></p>
+  </section>
+  <a href="index.html">Volver a la tienda ↗</a>
+</main><dialog id="account-dialog" aria-labelledby="account-title"><div id="account-root"></div></dialog><script type="module" src="contact.js"></script><script type="module" src="account.js"></script><script type="module" src="logo.js"></script><script type="module" src="public-header.js"></script></body></html>

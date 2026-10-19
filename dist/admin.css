@@ -484,6 +484,17 @@ legend {
 .overview span {
   color: var(--muted);
 }
+.buyer-support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+.buyer-support textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+}
 .order-card {
   background: var(--surface);
   border-color: var(--line);

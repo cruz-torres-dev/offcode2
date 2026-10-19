@@ -1,3 +1,5 @@
+import { createBuyerSupport } from "./order-support.js";
+
 const $ = (s) => document.querySelector(s);
 const money = (c) =>
   new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(
@@ -293,10 +295,6 @@ function formAction(card, order, label, fields, build) {
   };
   card.append(form);
 }
-function transferMessage(o) {
-  const account = o.transferAccount ?? bank;
-  return `OFFCODE · ${o.id}\nLA AFRO × OFFCODE: ${o.items.map((p) => `${p.qty} talla ${p.size}`).join(", ")}\nPrendas: ${money(o.subtotalCents)}\nEnvío: ${money(o.shippingCents)}\nTotal: ${money(o.totalCents)}\nBanco: ${account.name}\nBeneficiario: ${account.beneficiary}\nCLABE: ${account.clabe}\nReferencia: ${o.id}\nEl pago se confirmará al verificar el abono en nuestra cuenta.`;
-}
 function emailDetails(card, order) {
   const details = document.createElement("details");
   details.append(text("summary", "Correos transaccionales"));
@@ -433,30 +431,6 @@ function render() {
       }
     }
     if (o.status === "awaiting_transfer") {
-      const details = document.createElement("details");
-      details.append(text("summary", "Datos para compartir con el cliente"));
-      const message = document.createElement("textarea");
-      message.readOnly = true;
-      message.rows = 9;
-      message.value = transferMessage(o);
-      details.append(message);
-      const link = text("a", "Abrir mensaje en WhatsApp ↗", "secondary");
-      link.href =
-        "https://wa.me/" +
-        o.customer.phone +
-        "?text=" +
-        encodeURIComponent(message.value);
-      link.target = "_blank";
-      link.rel = "noopener";
-      details.append(
-        link,
-        text(
-          "p",
-          "Revisa el total y los datos antes de enviar. El enlace no envía automáticamente.",
-          "fine",
-        ),
-      );
-      card.append(details);
       const verified = fieldCheck(
         "Verifiqué en la cuenta bancaria el abono del total de este pedido.",
       );
@@ -483,7 +457,7 @@ function render() {
           button,
           text(
             "p",
-            "La guía no programa una recolección. Prepara el paquete y coordina su entrega con FedEx.",
+            "Imprime la guía y lleva el paquete empacado a FedEx. Marca enviado después de entregarlo.",
             "fine",
           ),
         );
@@ -543,17 +517,6 @@ function render() {
     }
     if (o.tracking) {
       card.append(text("p", `Envío: ${o.carrier} · Rastreo: ${o.tracking}`));
-      const notify = text("a", "Preparar aviso de envío ↗", "secondary");
-      notify.href =
-        "https://wa.me/" +
-        o.customer.phone +
-        "?text=" +
-        encodeURIComponent(
-          `OFFCODE · ${o.id}\nTu pedido fue enviado por ${o.carrier}. Número de rastreo: ${o.tracking}.`,
-        );
-      notify.target = "_blank";
-      notify.rel = "noopener";
-      card.append(notify);
     }
     if (o.status === "shipped") {
       const delivered = fieldCheck(
@@ -595,6 +558,8 @@ function render() {
         ),
       );
     card.append(history);
+    const support = createBuyerSupport(o, bank);
+    if (support) card.append(support);
     emailDetails(card, o);
     $("#orders").append(card);
   }

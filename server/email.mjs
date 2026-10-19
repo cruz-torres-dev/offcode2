@@ -81,3 +81,30 @@ export function renderEmailV1(data) {
     html: `<!doctype html><html lang="es"><head><meta charset="utf-8"></head><body style="margin:0;background:#080808;color:#f5f5f5;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px"><table role="presentation" width="100%" style="max-width:600px;background:#181818;border:1px solid #303030" cellpadding="28"><tr><td><p style="letter-spacing:3px;font-size:13px;color:#a6a6a6">OFFCODE</p><h1 style="font-size:28px;font-weight:400">${escapeHtml(title)}</h1>${lines.map((line) => `<p style="font-size:15px;line-height:1.7;color:#e0e0e0">${escapeHtml(line)}</p>`).join("")}<p style="border-top:1px solid #454545;padding-top:20px;color:#a6a6a6;font-size:12px">Notificación transaccional de tu pedido.</p></td></tr></table></td></tr></table></body></html>`,
   };
 }
+
+// V1 remains frozen so a queued retry keeps exactly the same provider body.
+export function renderEmailV2(data) {
+  const message = renderEmailV1(data);
+  if (data.audience !== "buyer") return message;
+  const actions = [];
+  if (data.event === "shipped" && /^[A-Za-z0-9]{4,40}$/.test(data.tracking ?? ""))
+    actions.push({ label: "Consultar rastreo FedEx", url: `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(data.tracking)}` });
+  try {
+    const url = new URL(data.supportUrl);
+    if (url.protocol === "https:" && !url.username && !url.password)
+      actions.push({ label: "Contactar a OFFCODE sobre este pedido", url: url.href });
+  } catch {}
+  if (!actions.length) return message;
+  const buttons = actions.map(({ label, url }) => `<p style="margin:24px 0"><a href="${escapeHtml(url)}" style="display:inline-block;padding:14px 20px;background:#f5f5f5;color:#080808;font-size:14px;text-decoration:none">${escapeHtml(label)} ↗</a></p><p style="font-size:12px;line-height:1.7;overflow-wrap:anywhere;color:#a6a6a6">${escapeHtml(url)}</p>`).join("");
+  return {
+    ...message,
+    text: message.text + "\n\n" + actions.map(({ label, url }) => `${label}: ${url}`).join("\n\n"),
+    html: message.html.replace('<p style="border-top:', buttons + '<p style="border-top:'),
+  };
+}
+
+export function renderOrderEmail(data) {
+  if (data?.template === 1) return renderEmailV1(data);
+  if (data?.template === 2) return renderEmailV2(data);
+  throw Error("unsupported_email_template");
+}
