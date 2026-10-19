@@ -1053,7 +1053,7 @@ body:has(dialog[open]) {
   #menu-toggle span {
     font-size: 16px;
   }
-  nav {
+  #main-nav {
     display: none;
     position: absolute;
     left: 0;
@@ -1065,12 +1065,12 @@ body:has(dialog[open]) {
     font-size: 14px;
   }
   #main-nav { grid-column: 1 / -1; gap: 0; }
-  nav.open {
+  #main-nav.open {
     display: flex;
     flex-direction: column;
     gap: 0;
   }
-  nav a {
+  #main-nav a {
     min-height: 48px;
     padding: 15px 0;
   }

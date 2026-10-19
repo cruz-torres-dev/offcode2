@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -27,7 +27,7 @@ async function start(options = {}) {
     return {
       cookies,
       async call(route, data, method = data === undefined ? "GET" : "POST", extra = {}) {
-        const r = await fetch(base + route, { method, redirect: "manual", headers: { Origin: origin, "Content-Type": "application/json", Cookie: [...cookies].map(([k,v]) => k + "=" + v).join("; "), ...extra },
+        const r = await fetch(base + route, { method, redirect: "manual", headers: { Origin: options.origin ?? origin, "Content-Type": "application/json", Cookie: [...cookies].map(([k,v]) => k + "=" + v).join("; "), ...extra },
           ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
         for (const c of r.headers.getSetCookie()) { const [k,v] = c.split(";")[0].split("="); cookies.set(k,v); }
         const text = await r.text();
@@ -121,6 +121,9 @@ test("Recuperación: respuesta indistinguible, token de un uso y caducidad, revo
   const app = await start({ customers: { now: () => clock } });
   try {
     const c = app.client(); await app.register(c, "recover@example.test");
+    const otherDevice = app.client();
+    assert.equal((await otherDevice.call("/api/customer/login", { email: "recover@example.test", password })).status, 200);
+    const oldSession = otherDevice.cookies.get("offcode_customer");
     const existing = await c.call("/api/customer/recover", { email: "recover@example.test" });
     const absent = await c.call("/api/customer/recover", { email: "missing@example.test" });
     assert.deepEqual([existing.status,existing.data], [absent.status,absent.data]);
@@ -129,12 +132,110 @@ test("Recuperación: respuesta indistinguible, token de un uso y caducidad, revo
     const next = "another-synthetic-password-123";
     assert.equal((await c.call("/api/customer/reset", { token, password: next })).status, 200);
     assert.equal((await c.call("/api/customer/profile")).status, 401);
+    assert.equal((await otherDevice.call("/api/customer/profile")).status, 401);
+    assert.equal(otherDevice.cookies.get("offcode_customer"), oldSession, "se rechaza también la cookie anterior conservada");
     assert.equal((await c.call("/api/customer/reset", { token, password: next })).status, 400);
     assert.equal((await c.call("/api/customer/login", { email: "recover@example.test", password })).status, 401);
     assert.equal((await c.call("/api/customer/login", { email: "recover@example.test", password: next })).status, 200);
     await c.call("/api/customer/recover", { email: "recover@example.test" }); await app.accounts.close();
     const expired = app.token("recover@example.test", "reset"); clock += 31 * 60e3;
     assert.equal((await c.call("/api/customer/reset", { token: expired, password: next })).status, 400);
+    assert.equal((await c.call("/api/customer/login", { email: "recover@example.test", password: next })).status, 200);
+  } finally { await app.close(); }
+});
+
+test("Correos de cuenta: CTA y URL copiable conservan el enlace real del backend en el origen de producción", async () => {
+  const productionOrigin = "https://offcode.mx";
+  const app = await start({ production: true, origin: productionOrigin });
+  try {
+    const c = app.client(), email = "cta@example.test";
+    assert.equal((await c.call("/api/customer/register", { email, password })).status, 200);
+    const verifyMessage = app.messages.at(-1);
+    assert.equal((await c.call("/api/customer/recover", { email })).status, 200);
+    await app.accounts.close();
+    const resetMessage = app.messages.at(-1);
+    for (const [message, purpose, action, duration] of [
+      [verifyMessage, "verify", "VERIFICAR MI CORREO", "24 horas"],
+      [resetMessage, "reset", "RESTABLECER MI CONTRASEÑA", "30 minutos"],
+    ]) {
+      const [cta, fallback] = [...message.html.matchAll(/<a href="([^"]+)" style="([^"]+)">([^<]+)<\/a>/g)];
+      assert.ok(cta && fallback);
+      const url = new URL(cta[1]);
+      assert.equal(url.origin, productionOrigin);
+      assert.equal(url.pathname, "/cuenta.html");
+      assert.equal(url.search, "");
+      const token = url.hash.slice(purpose.length + 2);
+      assert.match(url.hash, new RegExp(`^#${purpose}=[A-Za-z0-9_-]{43}$`));
+      assert.equal(cta[3], action);
+      assert.match(cta[2], /background-color:#ffffff/);
+      assert.match(cta[2], /color:#080808/);
+      assert.match(cta[2], /display:block/);
+      assert.equal(fallback[1], url.href);
+      assert.equal(fallback[3], url.href, "URL completa visible y copiable");
+      assert.match(fallback[2], /text-decoration:underline/);
+      assert.ok(message.text.includes(url.href) && message.text.includes(action));
+      for (const copy of [message.html, message.text]) {
+        assert.ok(copy.includes(duration));
+        assert.match(copy, /un solo uso/);
+        assert.match(copy, /Si no lo solicitaste, ignóralo/);
+      }
+      const saved = await app.db.get("SELECT * FROM customer_tokens WHERE purpose=?", [purpose]);
+      assert.equal(saved.token_hash, createHash("sha256").update(token).digest("hex"));
+      assert.ok(!JSON.stringify(app.logs).includes(token));
+      assert.equal((await c.call("/api/customer/" + purpose, { token, ...(purpose === "reset" ? { password } : {}) })).status, 200);
+    }
+    assert.equal((await app.db.get("SELECT COUNT(*) AS n FROM orders")).n, 0);
+  } finally { await app.close(); }
+});
+
+test("Verificación: rechaza token ausente, alterado, de recuperación, reemplazado y vencido sin verificar la cuenta", async () => {
+  let clock = Date.now();
+  const app = await start({ customers: { now: () => clock } });
+  try {
+    const c = app.client(), email = "verify-guards@example.test";
+    assert.equal((await c.call("/api/customer/register", { email, password })).status, 200);
+    const original = app.token(email);
+    for (const token of [undefined, "bad", (original[0] === "A" ? "B" : "A") + original.slice(1)])
+      assert.equal((await c.call("/api/customer/verify", { token })).status, 400);
+    assert.equal((await c.call("/api/customer/recover", { email })).status, 200);
+    await app.accounts.close();
+    assert.equal((await c.call("/api/customer/verify", { token: app.token(email, "reset") })).status, 400);
+    assert.equal((await c.call("/api/customer/reset", { token: original, password })).status, 400);
+    assert.equal((await c.call("/api/customer/verification", { email })).status, 200);
+    await app.accounts.close();
+    const fresh = app.token(email);
+    assert.notEqual(fresh, original);
+    assert.equal((await c.call("/api/customer/verify", { token: original })).status, 400);
+    clock += 86400e3; // At the exact expiry boundary, not only after it.
+    assert.equal((await c.call("/api/customer/verify", { token: fresh })).status, 400);
+    assert.equal((await app.db.get("SELECT verified_at FROM customers WHERE email=?", [email])).verified_at, null);
+    assert.equal((await c.call("/api/customer/verification", { email })).status, 200);
+    await app.accounts.close();
+    const valid = app.token(email);
+    assert.equal((await c.call("/api/customer/verify", { token: valid })).status, 200);
+    assert.equal((await c.call("/api/customer/verify", { token: valid })).status, 400);
+    assert.equal((await c.call("/api/customer/login", { email, password })).data.user.verified, true);
+  } finally { await app.close(); }
+});
+
+test("Recuperación: reemplazar un enlace invalida el anterior; caduca exactamente a los 30 minutos", async () => {
+  let clock = Date.now();
+  const app = await start({ customers: { now: () => clock } });
+  try {
+    const c = app.client(), email = "reset-boundary@example.test";
+    await app.register(c, email);
+    await c.call("/api/customer/recover", { email }); await app.accounts.close();
+    const first = app.token(email, "reset");
+    await c.call("/api/customer/recover", { email }); await app.accounts.close();
+    const current = app.token(email, "reset");
+    assert.notEqual(current, first);
+    const next = "unused-synthetic-password-123";
+    for (const token of [undefined, "invalid", first])
+      assert.equal((await c.call("/api/customer/reset", { token, password: next })).status, 400);
+    clock += 30 * 60e3;
+    assert.equal((await c.call("/api/customer/reset", { token: current, password: next })).status, 400);
+    assert.equal((await c.call("/api/customer/login", { email, password: next })).status, 401);
+    assert.equal((await c.call("/api/customer/login", { email, password })).status, 200);
   } finally { await app.close(); }
 });
 
@@ -180,9 +281,15 @@ test("Persisten cuentas, identidad, sesión y migraciones en el mismo SQLite al 
   try {
     app = await start({ databasePath }); const a = app.client(); await app.register(a, "persist@example.test");
     await a.call("/api/customer/profile", { name: "Nombre Persistente", address: null }, "PATCH");
+    const saved = await a.call("/api/customer/addresses", { ...customer("persist@example.test"), label: "Casa persistente" });
+    assert.equal(saved.status, 201);
+    assert.equal((await a.call("/api/customer/preferences", { marketing: true, consentVersion: "commercial-v1" }, "PATCH")).status, 200);
     const cookies = [...a.cookies]; await app.close();
     app = await start({ databasePath }); const b = app.client(); cookies.forEach(([k,v]) => b.cookies.set(k,v));
     assert.equal((await b.call("/api/customer/profile")).data.user.name, "Nombre Persistente");
+    assert.equal((await b.call("/api/customer/profile")).data.address.id, saved.data.address.id);
+    assert.deepEqual((await b.call("/api/customer/addresses")).data.addresses, [saved.data.address]);
+    assert.equal((await b.call("/api/customer/preferences")).data.marketing, "granted");
     assert.equal(await migrate(app.db), SCHEMA_VERSION); assert.equal(await migrate(app.db), SCHEMA_VERSION);
     assert.equal((await app.db.get("SELECT COUNT(*) AS n FROM customers")).n, 1);
     assert.equal((await app.db.get("SELECT COUNT(*) AS n FROM variants")).n, 4);
@@ -218,7 +325,7 @@ test("Fallo del correo de cuentas no confirma entregas ni filtra errores; recupe
   const messages = [];
   const app = await start({ customers: { fetcher: async (_, opts) => {
     messages.push(JSON.parse(opts.body));
-    return failing ? new Response(env.RESEND_API_KEY + password, { status: 503 }) : accepted();
+    return failing ? new Response(env.RESEND_API_KEY + password + messages.at(-1).text, { status: 503 }) : accepted();
   } } });
   try {
     const c = app.client();
@@ -231,6 +338,10 @@ test("Fallo del correo de cuentas no confirma entregas ni filtra errores; recupe
     assert.ok(app.logs.some((s) => s.includes('"state":"uncertain"')));
     assert.ok(!JSON.stringify([real.data, app.logs]).includes(env.RESEND_API_KEY));
     assert.ok(!JSON.stringify(app.logs).includes(password));
+    for (const message of messages) {
+      const token = message.text.match(/#(?:verify|reset)=([A-Za-z0-9_-]{43})/)[1];
+      assert.ok(!JSON.stringify(app.logs).includes(token), "los fallos del proveedor tampoco registran tokens");
+    }
     assert.equal((await app.db.get("SELECT COUNT(*) AS n FROM customers")).n, 1);
     assert.equal((await app.db.get("SELECT verified_at FROM customers")).verified_at, null);
     for (let i = 0; i < 8; i++) assert.equal((await c.call("/api/customer/login", { email: "absent@example.test", password })).status, 401);
@@ -250,6 +361,23 @@ test("Cookies de cliente en producción: prefijo Host, HttpOnly, Secure y sesió
     await c.call("/api/customer/logout", {}, "POST", headers);
     assert.equal((await c.call("/api/customer/session")).data.user, null);
     assert.equal((await app.db.get("SELECT COUNT(*) AS n FROM orders")).n, 0);
+  } finally { await app.close(); }
+});
+
+test("Sesión de cliente: solo hash en SQLite y rechazo de la cookie al cumplir siete días", async () => {
+  let clock = Date.now();
+  const app = await start({ customers: { now: () => clock } });
+  try {
+    const c = app.client(); await app.register(c, "session-expiry@example.test");
+    const cookie = c.cookies.get("offcode_customer");
+    const row = await app.db.get("SELECT * FROM customer_sessions");
+    assert.equal(row.token_hash, createHash("sha256").update(cookie).digest("hex"));
+    assert.equal(row.expires, clock + 7 * 86400e3);
+    clock += 7 * 86400e3 - 1;
+    assert.equal((await c.call("/api/customer/profile")).status, 200);
+    clock++;
+    assert.equal((await c.call("/api/customer/profile")).status, 401);
+    assert.equal((await c.call("/api/customer/session")).data.user, null);
   } finally { await app.close(); }
 });
 

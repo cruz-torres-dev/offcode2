@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -15,8 +15,8 @@ const address = (extra = {}) => ({ label: "Casa", name: "Persona Ficticia", phon
 
 async function start(options = {}) {
   const messages = [], logs = [];
-  const app = await createApp({ origin, password: ownerPassword, databasePath: options.databasePath ?? ":memory:",
-    enabled: true, production: !!options.production, bank: { name: "FICTICIO", beneficiary: "FICTICIO", clabe: "000000000000000000" },
+  const app = await createApp({ origin: options.origin ?? origin, password: ownerPassword, databasePath: options.databasePath ?? ":memory:",
+    enabled: !options.production, production: !!options.production, bank: { name: "FICTICIO", beneficiary: "FICTICIO", clabe: "000000000000000000" },
     whatsapp: "520000000000", privacyUrl: "https://example.test/privacy", termsUrl: "https://example.test/terms",
     email: { env: {}, autoStart: false, logger: () => {} },
     customers: { env, logger: (s) => logs.push(s), fetcher: async (_, opts) => { messages.push(JSON.parse(opts.body)); return accepted(); }, ...options.customers },
@@ -28,7 +28,7 @@ async function start(options = {}) {
     return {
       cookies,
       async call(route, data, method = data === undefined ? "GET" : "POST", extra = {}) {
-        const r = await fetch(base + route, { method, redirect: "manual", headers: { Origin: origin, "Content-Type": "application/json", Cookie: [...cookies].map(([k, v]) => k + "=" + v).join("; "), ...extra },
+        const r = await fetch(base + route, { method, redirect: "manual", headers: { Origin: options.origin ?? origin, "Content-Type": "application/json", Cookie: [...cookies].map(([k, v]) => k + "=" + v).join("; "), ...extra },
           ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
         for (const c of r.headers.getSetCookie()) { const [k, v] = c.split(";")[0].split("="); cookies.set(k, v); }
         const text = await r.text();
@@ -194,6 +194,12 @@ test("Cambio de correo: exige contraseña, verifica la nueva dirección y revoca
     assert.equal(requested.status, 200);
     assert.ok(!requested.data.message.includes("new@example.test"));
     const token = app.token("new@example.test", "email"); assert.ok(token, "el enlace va solo a la dirección nueva");
+    const message = app.messages.at(-1);
+    assert.match(message.html, />CONFIRMAR MI NUEVO CORREO<\/a>/);
+    const links = [...message.html.matchAll(/href="([^"]*#email=[^"]+)"/g)].map((m) => m[1]);
+    assert.deepEqual(links, [origin + "/cuenta.html#email=" + token, origin + "/cuenta.html#email=" + token]);
+    assert.ok(message.text.includes(links[0]));
+    assert.match(message.html, /60 minutos/);
     // Nothing changes until the new address is confirmed.
     assert.equal((await a.call("/api/customer/profile")).data.user.email, "old@example.test");
     assert.equal((await a.call("/api/customer/login", { email: "new@example.test", password })).status, 401);
@@ -214,6 +220,41 @@ test("Cambio de correo: exige contraseña, verifica la nueva dirección y revoca
     assert.equal(taken.data.message, requested.data.message);
     assert.equal(app.messages.length, messagesBefore);
     assert.equal(app.token("taken@example.test", "email"), undefined);
+  } finally { await app.close(); }
+});
+
+test("Cambio de correo: URL canónica y rechazo por propósito, reemplazo y límite exacto de 60 minutos", async () => {
+  let clock = Date.now();
+  const productionOrigin = "https://offcode.mx";
+  const app = await start({ origin: productionOrigin, production: true, customers: { now: () => clock } });
+  try {
+    const c = app.client(), email = "email-guards@example.test", nextEmail = "email-next@example.test";
+    await app.register(c, email);
+    const verifyToken = app.token(email);
+    await c.call("/api/customer/recover", { email }); await app.accounts.close();
+    const resetToken = app.token(email, "reset");
+    assert.equal((await c.call("/api/customer/email", { password, email: nextEmail })).status, 200);
+    const original = app.token(nextEmail, "email");
+    const message = app.messages.at(-1);
+    const links = [...message.html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
+    const expected = productionOrigin + "/cuenta.html#email=" + original;
+    assert.ok(links.length === 2 && links.every((link) => link === expected), "CTA y alternativa usan el mismo enlace canónico emitido");
+    assert.ok(message.html.includes(">" + expected + "</a>") && message.text.includes(expected), "la URL completa es visible y está en el texto plano");
+    const saved = await app.db.get("SELECT token_hash,expires FROM customer_email_changes");
+    assert.ok(saved.token_hash === createHash("sha256").update(original).digest("hex"), "el token corresponde al hash persistido");
+    assert.equal(saved.expires - clock, 60 * 60e3);
+    for (const token of [undefined, "invalid", verifyToken, resetToken])
+      assert.equal((await c.call("/api/customer/email/confirm", { token })).status, 400);
+    assert.equal((await c.call("/api/customer/verify", { token: original })).status, 400);
+    assert.equal((await c.call("/api/customer/reset", { token: original, password })).status, 400);
+    assert.equal((await c.call("/api/customer/email", { password, email: nextEmail })).status, 200);
+    const fresh = app.token(nextEmail, "email");
+    assert.ok(fresh !== original);
+    assert.equal((await c.call("/api/customer/email/confirm", { token: original })).status, 400);
+    clock += 60 * 60e3;
+    assert.equal((await c.call("/api/customer/email/confirm", { token: fresh })).status, 400);
+    assert.equal((await c.call("/api/customer/profile")).data.user.email, email);
+    assert.equal((await app.db.get("SELECT COUNT(*) AS n FROM orders")).n, 0);
   } finally { await app.close(); }
 });
 
@@ -258,13 +299,16 @@ test("Sesiones: cerrar sesión invalida la actual y revocar todas invalida el re
     assert.equal((await two.call("/api/customer/login", { email: "session@example.test", password })).status, 200);
     assert.equal((await two.call("/api/customer/profile")).status, 200);
 
+    const oldCookie = one.cookies.get("offcode_customer");
     assert.equal((await one.call("/api/customer/logout", {})).status, 200);
+    one.cookies.set("offcode_customer", oldCookie);
     assert.equal((await one.call("/api/customer/profile")).status, 401);
     assert.equal((await two.call("/api/customer/profile")).status, 200, "salir no cierra las otras sesiones");
 
     const revoked = await two.call("/api/customer/sessions/revoke-all", {});
     assert.equal(revoked.status, 200);
     assert.equal((await two.call("/api/customer/profile")).status, 401);
+    assert.equal((await one.call("/api/customer/profile")).status, 401);
     assert.equal((await app.db.get("SELECT COUNT(*) AS n FROM customer_sessions")).n, 0);
     assert.equal((await two.call("/api/customer/login", { email: "session@example.test", password })).status, 200);
   } finally { await app.close(); }

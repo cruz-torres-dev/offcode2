@@ -12,6 +12,11 @@
 .account-heading button,.account-heading a { display:grid; place-items:center; min-width:44px; min-height:44px; font-size:24px; }
 .account-heading .account-back { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:#c8c8c8; padding:0 12px; border:1px solid #303030; min-width:auto; }
 #account-root [data-status], #contact-status { line-height:1.6; margin:16px 0; color:#c8c8c8; overflow-wrap:anywhere; }
+#account-root [data-status]:empty { margin:0; }
+/* This heading receives focus after a view change. Keep that cue without the
+   browser's default box; interactive controls retain their visible outlines. */
+#account-title:focus { outline:none; }
+#account-title:focus-visible { text-decoration:underline; text-decoration-color:#a6a6a6; text-decoration-thickness:1px; text-underline-offset:.2em; }
 .account-form { display:grid; gap:20px; margin:24px 0; }
 .account-form label { display:grid; gap:10px; font-size:12px; line-height:1.5; }
 .account-form input:not([type=checkbox]), .account-form textarea { width:100%; min-height:48px; padding:12px; border:1px solid #454545; background:#111; color:#f5f5f5; font:inherit; border-radius:0; }
@@ -87,6 +92,7 @@
   .order-foot { align-items:flex-start; flex-direction:column; gap:8px; }
   .order-line { flex-direction:column; gap:4px; }
   .account-actions { gap:8px; }
+  .account-nav { gap:0; }
 }
 @media(prefers-reduced-motion:reduce) {
   .account-loading::after { animation:none; opacity:.6; }

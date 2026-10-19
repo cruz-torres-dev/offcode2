@@ -66,6 +66,28 @@ async function verifyPassword(value, stored) {
   return timingSafeEqual(Buffer.from(candidate.split("$")[5], "hex"), Buffer.from(valid ? parts[5] : "0".repeat(64), "hex")) && valid;
 }
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// One backend-generated URL for the CTA, copyable fallback and plain text.
+// Tables, explicit backgrounds and inline styles also work without head CSS.
+function accountLinkMessage({ from, to, title, action, url, notice }) {
+  const safeUrl = escapeHtml(url);
+  return {
+    from, to: [to], subject: `OFFCODE · ${title}`,
+    text: `OFFCODE · ${title}\n\n${action}\n${url}\n\n${notice}`,
+    html: `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body bgcolor="#080808" style="margin:0;padding:0;background-color:#080808;color:#f5f5f5;font-family:Arial,Helvetica,sans-serif">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#080808" style="width:100%;background-color:#080808"><tr><td align="center" style="padding:24px 16px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#181818" style="width:100%;max-width:600px;table-layout:fixed;background-color:#181818;border:1px solid #454545"><tr><td style="padding:28px 20px">
+<p style="margin:0 0 24px;color:#f5f5f5;font-size:14px;letter-spacing:3px">OFFCODE</p>
+<h1 style="margin:0 0 24px;color:#f5f5f5;font-size:26px;line-height:1.3;font-weight:400">${escapeHtml(title)}</h1>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%"><tr><td align="center" bgcolor="#ffffff" style="background-color:#ffffff;border:2px solid #ffffff">
+<a href="${safeUrl}" style="display:block;padding:16px 12px;background-color:#ffffff;border:1px solid #080808;color:#080808;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:22px;font-weight:700;text-align:center;text-decoration:none">${escapeHtml(action)}</a>
+</td></tr></table>
+<p style="margin:24px 0 8px;color:#e0e0e0;font-size:14px;line-height:1.6">Si el botón no funciona, copia y pega este enlace completo en tu navegador:</p>
+<p style="margin:0 0 24px;font-size:14px;line-height:1.6;word-break:break-all;overflow-wrap:anywhere"><a href="${safeUrl}" style="color:#ffffff;text-decoration:underline;word-break:break-all;overflow-wrap:anywhere">${safeUrl}</a></p>
+<p style="margin:0;border-top:1px solid #454545;padding-top:20px;color:#c7c7c7;font-size:13px;line-height:1.6">${escapeHtml(notice)}</p>
+</td></tr></table></td></tr></table></body></html>`,
+  };
+}
 const cookieValue = (req, name) => req.headers.cookie?.split(";").map((s) => s.trim()).find((s) => s.startsWith(name + "="))?.slice(name.length + 1) ?? "";
 
 export function createCustomerAccounts({ db, origin, production, body, send, limit, validateCustomer,
@@ -109,9 +131,10 @@ export function createCustomerAccounts({ db, origin, production, body, send, lim
     // Fragment tokens are never sent in the page URL request or Referer header.
     const url = `${origin}/cuenta.html#${purpose}=${token}`;
     const title = purpose === "reset" ? "Restablece tu contraseña" : "Verifica tu correo";
-    const text = `OFFCODE · ${title}\n\n${url}\n\nEste enlace es de un solo uso y vence en ${purpose === "reset" ? "30 minutos" : "24 horas"}. Si no lo solicitaste, ignóralo.`;
-    const result = await mail.send({ from: mail.from, to: [user.email], subject: `OFFCODE · ${title}`, text,
-      html: `<html lang="es"><body style="background:#080808;color:#f5f5f5;font-family:Arial;padding:32px"><h1>OFFCODE</h1><h2>${title}</h2><p><a style="color:#fff" href="${escapeHtml(url)}">${title}</a></p><p>Enlace de un solo uso. Vence en ${purpose === "reset" ? "30 minutos" : "24 horas"}. Si no lo solicitaste, ignóralo.</p></body></html>` }, `account/${digest(token)}`);
+    const result = await mail.send(accountLinkMessage({ from: mail.from, to: user.email, title, url,
+      action: purpose === "reset" ? "RESTABLECER MI CONTRASEÑA" : "VERIFICAR MI CORREO",
+      notice: `Este enlace es de un solo uso y vence en ${purpose === "reset" ? "30 minutos" : "24 horas"}. Si no lo solicitaste, ignóralo.`,
+    }), `account/${digest(token)}`);
     // Allowlisted metadata only: no recipient, body, token or provider error.
     try { logger(JSON.stringify({ component: "customer_email", state: result.state, code: result.code })); } catch {}
     if (result.state !== "accepted") throw fail(503, "No pudimos confirmar el envío del correo. Intenta solicitar otro enlace más tarde.");
@@ -223,9 +246,10 @@ export function createCustomerAccounts({ db, origin, production, body, send, lim
         [digest(token), user.id, newEmail, now() + 3600e3, at]);
     });
     const url = `${origin}/cuenta.html#email=${token}`;
-    const text = `OFFCODE · Confirma tu nueva dirección\n\n${url}\n\nEste enlace es de un solo uso y vence en 60 minutos. Tu correo actual sigue activo hasta que lo confirmes. Si no lo solicitaste, ignóralo.`;
-    const result = await mail.send({ from: mail.from, to: [newEmail], subject: "OFFCODE · Confirma tu nueva dirección", text,
-      html: `<html lang="es"><body style="background:#080808;color:#f5f5f5;font-family:Arial;padding:32px"><h1>OFFCODE</h1><h2>Confirma tu nueva dirección</h2><p><a style="color:#fff" href="${escapeHtml(url)}">Confirmar esta dirección</a></p><p>Enlace de un solo uso. Vence en 60 minutos. Tu correo actual sigue activo hasta que lo confirmes.</p></body></html>` }, `email-change/${digest(token)}`);
+    const result = await mail.send(accountLinkMessage({ from: mail.from, to: newEmail,
+      title: "Confirma tu nueva dirección", action: "CONFIRMAR MI NUEVO CORREO", url,
+      notice: "Este enlace es de un solo uso y vence en 60 minutos. Tu correo actual sigue activo hasta que lo confirmes. Si no lo solicitaste, ignóralo.",
+    }), `email-change/${digest(token)}`);
     try { logger(JSON.stringify({ component: "customer_email", state: result.state, code: result.code })); } catch {}
     if (result.state !== "accepted") throw fail(503, "No pudimos confirmar el envío del correo. Intenta solicitar otro enlace más tarde.");
   }

@@ -12,6 +12,7 @@ let viewParam = "";
 let linkToken = "";
 let rendered = "";
 let busy = false;
+let renderVersion = 0;
 
 const money = (cents) => (Number.isSafeInteger(cents) && cents >= 0
   ? new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(cents / 100)
@@ -57,7 +58,9 @@ function frame(title) {
     fullPage
       ? `<a class="account-back" href="index.html" aria-label="Volver a la tienda">Tienda ↗</a>`
       : `<button type="button" data-close aria-label="Cerrar cuenta">×</button>`
-  }</div><p data-status role="status" aria-live="polite"></p><div data-content></div>`;
+  }</div>${fullPage && session.user && Object.hasOwn(VIEWS, view) && view !== "home"
+    ? `<a class="account-back-link" href="${href("home")}">← Mi cuenta</a>`
+    : ""}<p data-status role="status" aria-live="polite"></p><div data-content></div>`;
   root.querySelector("[data-close]")?.addEventListener("click", () => dialog.close());
   if (fullPage) document.title = `${title} — OFFCODE`;
   if (rendered !== view + viewParam) {
@@ -178,9 +181,10 @@ function renderHome() {
     }));
 }
 
-async function renderOrders() {
+async function renderOrders(version) {
   loading("Mis pedidos", "Cargando tus pedidos…");
   const data = await api("orders");
+  if (version !== renderVersion) return;
   const content = frame("Mis pedidos");
   if (!data.orders.length) {
     content.innerHTML = `<div class="empty-state">
@@ -211,10 +215,11 @@ async function renderOrders() {
   content.append(list);
 }
 
-async function renderOrderDetail() {
-  if (!/^OF-[A-F0-9]{12}$/.test(viewParam)) { view = "pedidos"; viewParam = ""; return renderOrders(); }
+async function renderOrderDetail(version) {
+  if (!/^OF-[A-F0-9]{12}$/.test(viewParam)) { view = "pedidos"; viewParam = ""; return renderOrders(version); }
   loading("Detalle del pedido", "Cargando el pedido…");
   const { order } = await api("orders/" + viewParam);
+  if (version !== renderVersion) return;
   const content = frame("Pedido");
   if (fullPage) document.title = `Pedido ${order.id} — OFFCODE`;
   const rows = order.items.map((line) => `<li class="order-line">
@@ -252,12 +257,12 @@ async function renderOrderDetail() {
     </section>`;
 }
 
-async function renderProfile() {
+async function renderProfile(version) {
   loading("Mi perfil", "Cargando tu perfil…");
   const data = await api("profile");
+  if (version !== renderVersion) return;
   const content = frame("Mi perfil");
-  content.innerHTML = `<a class="account-back-link" href="${href("home")}">← Mi cuenta</a>
-    <form class="account-form" data-profile>
+  content.innerHTML = `<form class="account-form" data-profile>
       <label>Nombre<input name="name" autocomplete="name" minlength="3" maxlength="100" required value="${esc(data.user.name)}"></label>
       <button class="account-primary" type="submit">Guardar nombre</button>
     </form>
@@ -307,9 +312,10 @@ async function renderProfile() {
   });
 }
 
-async function renderAddresses() {
+async function renderAddresses(version) {
   loading("Direcciones", "Cargando tus direcciones…");
   const data = await api("addresses");
+  if (version !== renderVersion) return;
   const content = frame("Direcciones");
   const fields = [["label", "Etiqueta (Casa, Oficina)", "text", 40], ["name", "Nombre de quien recibe", "text", 100],
     ["phone", "Teléfono", "tel", 15], ["street", "Calle y número", "text", 150], ["number", "Número exterior e interior", "text", 30],
@@ -323,8 +329,7 @@ async function renderAddresses() {
       <div class="account-actions"><button class="account-primary" type="submit">Guardar dirección</button><button type="button" class="account-secondary" data-cancel>Cancelar</button></div>
     </form>`;
   };
-  content.innerHTML = `<a class="account-back-link" href="${href("home")}">← Mi cuenta</a>
-    <div data-list></div>
+  content.innerHTML = `<div data-list></div>
     <div data-editor hidden></div>
     <button type="button" class="account-primary" data-add>Añadir dirección</button>`;
   const list = content.querySelector("[data-list]"), editor = content.querySelector("[data-editor]");
@@ -348,7 +353,7 @@ async function renderAddresses() {
         if (address) await api("addresses/" + address.id, payload, "PATCH");
         else await api("addresses", payload);
         closeEditor();
-        await paint();
+        await reload();
         status(address ? "Dirección actualizada." : "Dirección guardada.");
       });
     });
@@ -408,16 +413,16 @@ async function renderAddresses() {
   addButton.addEventListener("click", () => openEditor(null));
 }
 
-async function renderPreferences() {
+async function renderPreferences(version) {
   loading("Preferencias", "Cargando tus preferencias…");
   const data = await api("preferences");
+  if (version !== renderVersion) return;
   const content = frame("Preferencias");
   const checked = data.marketing === "granted";
-  content.innerHTML = `<a class="account-back-link" href="${href("home")}">← Mi cuenta</a>
-    <form class="account-form">
+  content.innerHTML = `<form class="account-form">
       <label class="account-check"><input name="marketing" type="checkbox" ${checked ? "checked" : ""}> Recibir comunicaciones comerciales por correo</label>
       <p class="account-note">${esc(data.consentText)}</p>
-      <p class="account-note">Los correos necesarios sobre tus pedidos (confirmación, pago y envío) no son publicidad y se envían siempre. ${data.marketing === "unset" ? "Todavía no has registrado una elección." : ""}</p>
+      <p class="account-note">Los correos necesarios sobre tus pedidos (confirmación, pago y envío) no son publicidad y no dependen de esta preferencia. ${data.marketing === "unset" ? "Todavía no has registrado una elección." : ""}</p>
       <button class="account-primary" type="submit">Guardar preferencia</button>
     </form>`;
   const form = content.querySelector("form");
@@ -432,8 +437,7 @@ async function renderPreferences() {
 
 function renderSecurity() {
   const content = frame("Seguridad");
-  content.innerHTML = `<a class="account-back-link" href="${href("home")}">← Mi cuenta</a>
-    <section class="order-section" aria-label="Sesiones">
+  content.innerHTML = `<section class="order-section" aria-label="Sesiones">
       <h2>Sesiones</h2>
       <p class="account-note">Tu sesión se guarda en una cookie privada del servidor. Cerrar sesión la invalida de inmediato.</p>
       <button type="button" class="account-secondary" data-logout>Cerrar sesión</button>
@@ -485,6 +489,9 @@ const VIEWS = {
 };
 
 async function render() {
+  // A slow response must not replace a newer view after Back, logout or a
+  // click on the account icon. Requests still use the normal session checks.
+  const version = ++renderVersion;
   try {
     if (["verify", "reset", "email"].includes(view)) return renderToken();
     if (!session.user) return renderGuest();
@@ -494,9 +501,10 @@ async function render() {
       status("Verifica tu correo para consultar tu perfil y tus pedidos.", "error");
       return;
     }
-    if (view === "pedidos" && viewParam) return await renderOrderDetail();
-    await VIEWS[view]();
+    if (view === "pedidos" && viewParam) return await renderOrderDetail(version);
+    await VIEWS[view](version);
   } catch (error) {
+    if (version !== renderVersion) return;
     if (error?.status === 401) {
       // The session expired or was revoked elsewhere: back to a clean sign-in.
       session.user = null; view = "login"; viewParam = ""; rendered = "";
@@ -514,7 +522,12 @@ async function render() {
 function readRoute() {
   let raw = location.hash.slice(1);
   try { raw = decodeURIComponent(raw); } catch { return false; }
-  if (!raw) return false;
+  // Returning with browser Back can remove the hash altogether. The old
+  // header anchor is also accepted for already-open pages and saved links.
+  if (!raw || raw === "account-root" || raw === "/") {
+    view = "home"; viewParam = "";
+    return true;
+  }
   for (const key of ["verify", "reset", "email"]) {
     if (raw.startsWith(key + "=")) {
       linkToken = raw.slice(key.length + 1);
@@ -545,7 +558,7 @@ await refresh();
 render();
 
 window.addEventListener("hashchange", () => {
-  if (readRoute()) render();
+  if (readRoute()) return render();
 });
 
 toggle?.addEventListener("click", async () => {
