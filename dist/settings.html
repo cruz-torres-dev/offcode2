@@ -48,21 +48,22 @@
         <div class="dashboard-head">
           <div>
             <p class="eyebrow">CONFIGURACIÓN / OFFCODE</p>
-            <h1>Prepara el siguiente pedido.</h1>
+            <h1>Prepara tu tienda y tus envíos.</h1>
           </div>
           <button id="reload-settings">Recargar</button>
         </div>
         <p class="intro">
-          Tus datos se guardan de forma privada en el servidor. La recepción de
-          pedidos se activa al final, después de revisar la configuración y
-          probar tu cuenta.
+          Tus datos se guardan de forma privada en el servidor. Puedes configurar
+          Envia y consultar tarifas sin completar las páginas legales ni abrir pedidos.
+          La recepción de pedidos tiene su propio estado y no se activa al cotizar.
         </p>
         <section aria-labelledby="readiness-title" class="readiness">
           <h2 id="readiness-title">Estado de preparación</h2>
           <div id="readiness-checks"></div>
           <p class="fine">
-            “Completo” indica que los campos requeridos están presentes. Valida
-            tu cuenta, tarifas y una guía con Envia antes del lanzamiento.
+            Los estados son independientes. Tener datos de envío no acredita
+            una tarifa válida ni significa que la tienda pueda recibir pedidos.
+            La consulta privada solo muestra tarifas; no compra guías.
           </p>
         </section>
         <form id="settings-form">
@@ -105,35 +106,11 @@
             </p>
           </fieldset>
           <fieldset>
-            <legend>02 / Información de compra</legend>
-            <div class="form-grid">
-              <label
-                >Aviso de privacidad publicado (HTTPS)<input
-                  name="privacyUrl"
-                  type="url"
-                  maxlength="2048"
-                  placeholder="https://…"
-              /></label>
-              <label
-                >Condiciones de compra publicadas (HTTPS)<input
-                  name="termsUrl"
-                  type="url"
-                  maxlength="2048"
-                  placeholder="https://…"
-              /></label>
-            </div>
-            <p class="fine">
-              Publica información real sobre uso de datos para pedidos y
-              Envia/FedEx, envíos, cambios y devoluciones. Estos campos enlazan
-              a tus páginas; no generan políticas automáticamente.
-            </p>
-          </fieldset>
-          <fieldset>
-            <legend>03 / Cuenta de Envia · Solo FedEx</legend>
+            <legend>02 / Cuenta de Envia · Solo FedEx</legend>
             <div class="form-grid">
               <label
                 >Entorno<select name="enviaEnvironment">
-                  <option value="sandbox">Pruebas / sandbox</option>
+                  <option value="sandbox">Sandbox / sin validez para envíos</option>
                   <option value="production">Producción / guías reales</option>
                 </select></label
               >
@@ -164,15 +141,26 @@
               ></label
             >
             <button type="button" id="check-envia">
-              Consultar estados y comprobar acceso a Envia
+              Consultar catálogo de estados de Envia
             </button>
             <p id="envia-check-message" role="status" class="fine">
-              Guarda el token antes de comprobarlo. Esta consulta no compra
-              guías.
+              Se usa el token guardado, sin volver a pedirlo. El catálogo no
+              confirma permisos para cotizar ni compra guías.
             </p>
+            <label class="check"
+              ><input name="enviaEnabled" type="checkbox" /><span
+                >Habilitar la integración de envíos en la tienda y el panel de pedidos.
+                No es necesario para la consulta privada de tarifas.</span
+              ></label
+            >
           </fieldset>
           <fieldset>
-            <legend>04 / Domicilio de origen en México</legend>
+            <legend>03 / Domicilio de origen en México</legend>
+            <p class="fine">
+              Este es el único origen utilizado por Envia. Si ya guardaste la
+              configuración aquí, tiene prioridad sobre ENVIA_ORIGIN_JSON del
+              servidor. No hace falta mantener otra copia ni publicar este domicilio.
+            </p>
             <div class="form-grid">
               <label
                 >Nombre del remitente<input
@@ -229,7 +217,7 @@
             </div>
           </fieldset>
           <fieldset>
-            <legend>05 / Peso y medidas del paquete</legend>
+            <legend>04 / Peso y medidas del paquete</legend>
             <p class="intro">
               Añade un perfil por cantidad total de prendas. Mide y pesa el
               paquete cerrado, listo para entregar. Cada perfil representa un
@@ -245,25 +233,36 @@
             </p>
           </fieldset>
           <fieldset>
+            <legend>05 / Privacidad y condiciones (opcional)</legend>
+            <p class="fine">
+              Puedes añadir estos enlaces cuando el cliente los proporcione.
+              Dejarlos vacíos no impide activar pedidos ni envíos. Cuando los
+              guardes, se mostrarán en la tienda y el checkout.
+            </p>
+            <div class="form-grid">
+              <label>Aviso de privacidad publicado (HTTPS, opcional)<input
+                name="privacyUrl" type="url" maxlength="2048" placeholder="https://…"
+              /></label>
+              <label>Condiciones de compra publicadas (HTTPS, opcional)<input
+                name="termsUrl" type="url" maxlength="2048" placeholder="https://…"
+              /></label>
+            </div>
+          </fieldset>
+          <fieldset>
             <legend>06 / Recepción de pedidos</legend>
-            <label class="check"
-              ><input name="enviaEnabled" type="checkbox" /><span
-                >Habilitar cotización y compra de guías FedEx mediante
-                Envia.</span
-              ></label
-            >
             <label class="check"
               ><input name="ordersEnabled" type="checkbox" /><span
                 >Recibir solicitudes de pedido por transferencia. Revisé los
-                datos y las condiciones de compra.</span
+                datos de contacto, transferencia y envío.</span
               ></label
             >
             <p class="fine">
-              En pruebas, las tarifas y guías son simuladas. Para abrir ventas
+              En Sandbox, las tarifas y guías no tienen validez para enviar. Para abrir ventas
               en el servidor de producción selecciona producción y configura su
               token. El inventario y las transferencias se confirman
               manualmente.
             </p>
+            <p id="orders-lock-message" class="fine"></p>
           </fieldset>
           <section class="save-settings">
             <label
@@ -280,6 +279,37 @@
             <p id="saved-at" class="fine"></p>
           </section>
         </form>
+        <section aria-labelledby="envia-preview-title">
+          <p class="eyebrow">CONSULTA PRIVADA DE ENVÍO</p>
+          <h2 id="envia-preview-title">Cotizar sin abrir pedidos</h2>
+          <p class="intro">
+            Usa el origen, token, entorno y empaque guardados arriba. Introduce
+            un destino real autorizado para consultar su tarifa en Envia. Esta
+            consulta no compra guías ni crea pedidos o reservas de inventario.
+            Los datos del destino no se guardan en OFFCODE.
+          </p>
+          <p id="envia-preview-config" class="fine"></p>
+          <form id="envia-preview-form">
+            <fieldset>
+              <legend>Destino de la cotización en México</legend>
+              <div class="form-grid">
+                <label>Prenda<select name="variantId" required></select></label>
+                <label>Cantidad de prendas<input name="qty" type="number" min="1" max="99" value="1" required /></label>
+                <label>Nombre del destinatario<input name="name" minlength="3" maxlength="100" required /></label>
+                <label>Teléfono con código de país<input name="phone" type="tel" inputmode="tel" pattern="[0-9]{10,15}" maxlength="15" required /></label>
+                <label>Correo del destinatario<input name="email" type="email" maxlength="150" required /></label>
+                <label>Calle y número<input name="street" minlength="5" maxlength="150" required /></label>
+                <label>Colonia<input name="neighborhood" minlength="2" maxlength="100" required /></label>
+                <label>Ciudad o municipio<input name="city" minlength="2" maxlength="100" required /></label>
+                <label>Estado (catálogo de Envia)<select name="state" required><option value="">Consulta el catálogo de estados</option></select></label>
+                <label>Código postal<input name="postalCode" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" required /></label>
+              </div>
+            </fieldset>
+            <button id="envia-preview-submit" type="submit" disabled>Consultar tarifa privada de FedEx</button>
+          </form>
+          <p id="envia-preview-message" role="status" aria-live="polite" class="message"></p>
+          <div id="envia-preview-results" aria-live="polite"></div>
+        </section>
         <section id="account">
           <p class="eyebrow">MI ACCESO</p>
           <h2>Cambiar contraseña del propietario</h2>

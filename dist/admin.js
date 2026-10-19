@@ -81,7 +81,7 @@ async function load() {
   labels = data.labels;
   shipping = data.shipping ?? {};
   $("#shipping-status").textContent = shipping.enabled
-    ? `Envia configurado · Solo FedEx · ${shipping.environment === "sandbox" ? "PRUEBAS: guías sin validez para enviar" : "Producción: comprar una guía genera un cargo en Envia"}.`
+    ? `Envia configurado · Solo FedEx · ${shipping.environment === "sandbox" ? "Sandbox: guías sin validez para enviar" : "Producción: comprar una guía genera un cargo en Envia"}.`
     : "Envia pendiente de configuración. Solo puedes registrar guías FedEx compradas por separado.";
   $("#login").hidden = true;
   $("#dashboard").hidden = false;
@@ -175,7 +175,7 @@ function labelDetails(card, order) {
       text(
         "h3",
         job.environment === "sandbox"
-          ? "Guía de PRUEBA · No válida para enviar"
+          ? "Guía de Sandbox · No válida para enviar"
           : "Guía preparada · Falta entregar el paquete",
       ),
     );
@@ -1079,7 +1079,7 @@ async function loadShipping() {
   $("#shipping-panel-status").textContent = value.enabled
     ? `Envia configurado · Solo FedEx · ${
         value.environment === "sandbox"
-          ? "PRUEBAS: las guías no tienen validez para enviar."
+          ? "Sandbox: las guías no tienen validez para enviar."
           : "Producción: comprar una guía genera un cargo real."
       }`
     : "Envia pendiente de configuración: los pedidos se guardan sin tarifa de envío y no se puede comprar guía.";
@@ -1097,7 +1097,7 @@ async function loadSettings() {
   const data = await api("/api/admin/summary");
   const value = data.shipping ?? {};
   $("#settings-envia-status").textContent = value.enabled
-    ? `Envia: ${value.environment === "sandbox" ? "sandbox (pruebas)" : "producción"}.`
+    ? `Envia: ${value.environment === "sandbox" ? "Sandbox (sin validez para envíos)" : "producción"}.`
     : "Envia: pendiente de configuración.";
 }
 

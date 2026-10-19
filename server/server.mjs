@@ -405,7 +405,7 @@ export async function createApp(options = {}) {
           if (data.consent !== true)
             throw httpError(
               400,
-              "Acepta el aviso de privacidad antes de cotizar el envío.",
+              "Acepta el uso de tus datos para gestionar el pedido y el envío antes de cotizar.",
             );
           return send(res, 200, {
             rates: await quoteShipping(
@@ -484,7 +484,7 @@ export async function createApp(options = {}) {
           if (data.consent !== true)
             throw httpError(
               400,
-              "Confirma el aviso de privacidad y las condiciones.",
+              "Acepta el uso de tus datos para gestionar el pedido y el envío.",
             );
           if (
             typeof data.requestKey !== "string" ||
@@ -668,6 +668,7 @@ export async function createApp(options = {}) {
               updatedAt: settingsUpdatedAt,
               canSave: store.keyConfigured,
               production,
+              ordersLockedByEnv,
               checks: readiness(currentSettings, {
                 production,
                 keyConfigured: store.keyConfigured,
@@ -769,8 +770,37 @@ export async function createApp(options = {}) {
               );
             return send(res, 200, {
               states,
+              environment: provider.environment,
               message:
-                "Envia respondió al consultar sus estados. Todavía falta validar cobertura, tarifas y una guía para tus paquetes.",
+                "Catálogo de estados consultado. Esto no confirma los permisos del token para cotizar ni genera guías. Consulta una tarifa con domicilio y empaque reales.",
+            });
+          }
+          if (route === "/api/admin/envia/rates" && req.method === "POST") {
+            limit("envia-preview:" + ip, 10, 15 * 60e3);
+            const data = await body(req), revision = settingsVersion;
+            if (data.version !== revision)
+              throw httpError(409, "La configuración cambió. Recarga antes de cotizar.");
+            // A private rate probe uses the saved configuration without changing
+            // activation flags, creating checkout quotes or reserving inventory.
+            const provider = validateActivation(
+              { ...currentSettings, enabled: false, envia: { ...currentSettings.envia, enabled: true } },
+              { production, passwordConfigured: !!passwordHash, fetcher: options.envia?.fetch },
+            );
+            const customer = validateCustomer(data.customer);
+            const variant = typeof data.variantId === "string" ? await db.get(
+              "SELECT p.price_cents FROM variants v JOIN products p ON p.id=v.product_id WHERE v.id=? AND v.status='active' AND p.status='published'",
+              [data.variantId],
+            ) : null;
+            if (!variant || !Number.isInteger(data.qty) || data.qty < 1 || data.qty > 99)
+              throw httpError(400, "Selecciona una prenda y una cantidad entre 1 y 99 para la cotización.");
+            const payload = await provider.payload(customer, [{ qty: data.qty, unitCents: variant.price_cents }]);
+            const rates = await provider.rates(payload);
+            if (revision !== settingsVersion)
+              throw httpError(409, "La configuración cambió durante la cotización. Vuelve a consultar.");
+            return send(res, 200, {
+              rates,
+              environment: provider.environment,
+              message: "Cotización privada de FedEx. No se creó pedido, reserva ni guía; no se realizó ningún cargo.",
             });
           }
           if (route === "/api/admin/overview" && req.method === "GET") {
@@ -1190,7 +1220,7 @@ export async function createApp(options = {}) {
               )
                 throw httpError(
                   409,
-                  "Una guía de prueba no sirve para enviar en producción.",
+                  "Una guía de sandbox no sirve para enviar en producción.",
                 );
               order.carrier = "FedEx";
               order.tracking =

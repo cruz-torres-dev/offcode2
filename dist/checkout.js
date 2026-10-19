@@ -13,7 +13,7 @@ function clearRates() {
   selectedRate = null;
   $("#shipping-rates").replaceChildren();
   $("#shipping-message").textContent =
-    "Consulta FedEx después de completar tus datos y aceptar el aviso de privacidad.";
+    "Consulta FedEx después de completar tus datos y aceptar su uso para gestionar el pedido y el envío.";
   $("#shipping-summary").textContent = "Envío pendiente de cotizar.";
   $("#shipping-summary").className = "fine";
   $("#submit-order").disabled = true;
@@ -79,15 +79,26 @@ async function init() {
       "Pedidos todavía no habilitados. No se guardarán datos ni se realizarán cobros.";
     return;
   }
-  $("#privacy-link").href = config.privacyUrl;
-  $("#terms-link").href = config.termsUrl;
+  for (const [selector, value] of [
+    ["#privacy-link", config.privacyUrl],
+    ["#terms-link", config.termsUrl],
+  ]) {
+    if (!value) continue;
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "https:" || url.username || url.password) continue;
+      $(selector).href = url.href;
+      $(selector).hidden = false;
+      $("#checkout-policies").hidden = false;
+    } catch {}
+  }
   $("#availability").textContent =
     "Pago por transferencia bancaria. Primero confirmaremos tu solicitud y el envío.";
   $("#order-form").hidden = false;
   if (config.shipping?.enabled) {
     $("#availability").textContent =
       config.shipping.environment === "sandbox"
-        ? "PRUEBAS: tarifas y guías simuladas. No transfieras dinero."
+        ? "Sandbox: tarifas y guías sin validez para envíos reales. No transfieras dinero."
         : "Envíos por FedEx. Paga por transferencia después de que OFFCODE confirme disponibilidad y total.";
     $("#shipping-section").hidden = false;
     clearRates();

@@ -94,7 +94,7 @@ export function normalizeSettings(input, previous) {
         "Las páginas de privacidad y condiciones deben usar HTTPS y no incluir credenciales.",
       );
   if (!["sandbox", "production"].includes(value.envia.environment))
-    throw error("Selecciona pruebas o producción para Envia.");
+    throw error("Selecciona Sandbox o producción para Envia.");
   if (
     !["PAPER_4X6", "STOCK_4X6", "PAPER_7X4.75", "PAPER_LETTER"].includes(
       value.envia.printSize,
@@ -183,11 +183,10 @@ export function validateActivation(
       !value.bank.name ||
       !value.bank.beneficiary ||
       !/^\d{18}$/.test(value.bank.clabe) ||
-      !/^\d{10,15}$/.test(value.whatsapp) ||
-      ![value.privacyUrl, value.termsUrl].every((u) => safeUrl(u)))
+      !/^\d{10,15}$/.test(value.whatsapp))
   )
     throw error(
-      "Completa contraseña, banco, beneficiario, CLABE, WhatsApp y URLs HTTPS de privacidad y condiciones antes de habilitar pedidos.",
+      "Completa contraseña, banco, beneficiario, CLABE y WhatsApp antes de habilitar pedidos.",
     );
   if (
     production &&
@@ -196,7 +195,7 @@ export function validateActivation(
     value.envia.environment !== "production"
   )
     throw error(
-      "No abras ventas reales con cotizaciones simuladas: selecciona producción en Envia.",
+      "No abras ventas reales con cotizaciones simuladas de Sandbox: selecciona producción en Envia.",
     );
   try {
     return createEnvia({ ...value.envia, fetch: fetcher });
@@ -208,16 +207,10 @@ export function readiness(
   value,
   { production, keyConfigured, passwordConfigured, lockedByEnv = false },
 ) {
-  let salesError = "",
-    shippingError = "";
-  try {
-    validateActivation(
-      { ...value, enabled: true, envia: { ...value.envia, enabled: false } },
-      { production, passwordConfigured },
-    );
-  } catch (e) {
-    salesError = e.message;
-  }
+  const salesReady = !!value.bank.name && !!value.bank.beneficiary &&
+    /^\d{18}$/.test(value.bank.clabe) && /^\d{10,15}$/.test(value.whatsapp);
+  const legalReady = [value.privacyUrl, value.termsUrl].every((u) => safeUrl(u));
+  let shippingError = "";
   try {
     createEnvia({ ...value.envia, enabled: true });
   } catch (e) {
@@ -243,10 +236,19 @@ export function readiness(
     {
       id: "sales",
       label: "Datos para pedidos y transferencias",
-      ok: !salesError,
-      detail:
-        salesError ||
-        "Contacto, cuenta y enlaces de políticas completos. Confirma que los datos son reales.",
+      ok: salesReady,
+      detail: salesReady
+        ? "Contacto y cuenta receptora presentes. El pago se confirma manualmente al verificar el abono."
+        : "Faltan contacto o datos de transferencia. No impiden preparar ni consultar Envia.",
+    },
+    {
+      id: "legal",
+      label: "Privacidad y condiciones (opcional)",
+      ok: legalReady,
+      optional: true,
+      detail: legalReady
+        ? "URLs HTTPS guardadas. Verifica que las páginas sean reales, completas y aprobadas; el panel no valida su contenido."
+        : "Puedes añadir estos enlaces cuando estén disponibles. Su ausencia no bloquea los pedidos ni los envíos.",
     },
     {
       id: "shipping",
@@ -254,7 +256,7 @@ export function readiness(
       ok: !shippingError,
       detail:
         shippingError ||
-        "Token, origen y perfiles de empaque completos; falta validar tarifas y una guía con su cuenta.",
+        "Token, origen y empaques presentes. Puedes consultar tarifas en privado con los pedidos cerrados; esto aún no acredita credenciales ni cobertura.",
     },
     {
       id: "mode",
@@ -263,17 +265,17 @@ export function readiness(
       detail:
         value.envia.environment === "production"
           ? "Producción seleccionada. Esto no confirma que el token o las tarifas sean válidos."
-          : "Pruebas: las guías no sirven para entregar paquetes.",
+          : "Sandbox: las guías no sirven para entregar paquetes.",
     },
     {
       id: "orders",
       label: "Recepción de pedidos",
       ok: value.enabled && !lockedByEnv,
       detail: lockedByEnv
-        ? "Bloqueada por ORDERS_ENABLED=false en el servidor. El panel no puede habilitarla; cambia esa variable en Render."
+        ? "Bloqueada por ORDERS_ENABLED=false en el servidor. Las consultas privadas de Envia no abren pedidos."
         : value.enabled
           ? "Habilitada. Inventario y depósitos siguen verificándose manualmente."
-          : "Cerrada; la tienda permanece en demostración.",
+          : "La recepción de pedidos está cerrada.",
     },
   ];
 }

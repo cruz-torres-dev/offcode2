@@ -2,11 +2,17 @@ const $ = (s) => document.querySelector(s);
 const form = $("#settings-form");
 let current = null,
   version = 0,
-  canSave = false;
+  canSave = false,
+  canPreview = false;
 const field = (name) => form.elements.namedItem(name);
 function lock() {
   current = null;
   form.reset();
+  $("#envia-preview-form").reset();
+  $("#envia-preview-results").replaceChildren();
+  $("#envia-preview-message").textContent = "";
+  $("#envia-preview-submit").disabled = true;
+  canPreview = false;
   $("#password-form").reset();
   $("#package-profiles").replaceChildren();
   $("#readiness-checks").replaceChildren();
@@ -65,13 +71,14 @@ function profile(qty = "", value = {}) {
   $("#package-profiles").append(row);
 }
 function loadStates(states) {
-  const select = field("senderState"),
-    chosen = select.value;
-  select.replaceChildren(new Option("Selecciona el estado de origen", ""));
-  for (const state of states) select.append(new Option(state.name, state.code));
-  if (chosen && !states.some((s) => s.code === chosen))
-    select.append(new Option(chosen, chosen));
-  select.value = chosen;
+  for (const select of [field("senderState"), $("#envia-preview-form").elements.namedItem("state")]) {
+    const chosen = select.value;
+    select.replaceChildren(new Option("Selecciona el estado", ""));
+    for (const state of states) select.append(new Option(state.name, state.code));
+    if (chosen && !states.some((s) => s.code === chosen))
+      select.append(new Option(chosen, chosen));
+    select.value = chosen;
+  }
 }
 async function load() {
   const data = await api("/api/admin/settings");
@@ -114,6 +121,10 @@ async function load() {
     ),
   );
   field("ordersEnabled").checked = current.enabled;
+  field("ordersEnabled").disabled = data.ordersLockedByEnv;
+  $("#orders-lock-message").textContent = data.ordersLockedByEnv
+    ? "Recepción cerrada por ORDERS_ENABLED=false. Configurar o consultar Envia no cambia este bloqueo."
+    : "La recepción solo cambia al guardar su casilla y cumplir los requisitos de compra.";
   field("enviaEnabled").checked = current.envia.enabled;
   $("#package-profiles").replaceChildren();
   for (const [qty, value] of Object.entries(current.envia.profiles))
@@ -128,7 +139,9 @@ async function load() {
     block.append(
       text(
         "span",
-        check.ok ? "Completo" : "Pendiente",
+        check.id === "orders" ? (check.ok ? "Abierta" : "Cerrada") :
+          check.optional ? (check.ok ? "Disponibles" : "Opcional") :
+          (check.ok ? "Datos presentes" : "Pendiente"),
         check.ok ? "badge ready" : "badge",
       ),
       text("strong", check.label),
@@ -143,6 +156,27 @@ async function load() {
       ? "Último guardado: " + new Date(data.updatedAt).toLocaleString("es-MX")
       : "Al guardar se creará tu configuración privada, que tendrá prioridad sobre los valores iniciales de Render.";
   $("#check-envia").disabled = !current.envia.tokenConfigured;
+  const shippingCheck = data.checks.find((check) => check.id === "shipping");
+  canPreview = !!shippingCheck?.ok;
+  $("#envia-preview-form").reset();
+  $("#envia-preview-results").replaceChildren();
+  $("#envia-preview-message").textContent = "";
+  $("#envia-preview-config").textContent =
+    `Entorno guardado: ${current.envia.environment === "production" ? "producción (tarifas reales)" : "Sandbox (tarifas sin validez para envíos)"}. ` +
+    (canPreview ? "Consulta el catálogo, selecciona el estado del destino y cotiza una tarifa. Los enlaces legales no son necesarios para esta consulta."
+      : shippingCheck?.detail || "Completa y guarda el origen y los empaques antes de cotizar.");
+  const select = $("#envia-preview-form").elements.namedItem("variantId");
+  select.replaceChildren(new Option("Selecciona una prenda", ""));
+  $("#envia-preview-submit").disabled = true;
+  try {
+    const catalog = await api("/api/catalog");
+    for (const product of catalog.products)
+      for (const variant of product.variants)
+        select.append(new Option(`${product.name} · ${variant.size}`, variant.id));
+    $("#envia-preview-submit").disabled = !canPreview || select.options.length < 2;
+  } catch (e) {
+    $("#envia-preview-message").textContent = e.message;
+  }
 }
 $("#login-form").onsubmit = async (e) => {
   e.preventDefault();
@@ -185,11 +219,39 @@ $("#check-envia").onclick = async () => {
       body: "{}",
     });
     loadStates(data.states);
-    $("#envia-check-message").textContent = data.message;
+    $("#envia-check-message").textContent =
+      `Entorno consultado: ${data.environment === "production" ? "producción" : "Sandbox"}. ${data.message}`;
   } catch (e) {
     $("#envia-check-message").textContent = e.message;
   } finally {
     button.disabled = !current?.envia.tokenConfigured;
+  }
+};
+$("#envia-preview-form").onsubmit = async (e) => {
+  e.preventDefault();
+  if (!current || !canPreview) return;
+  const button = $("#envia-preview-submit");
+  button.disabled = true;
+  $("#envia-preview-results").replaceChildren();
+  $("#envia-preview-message").textContent = "Consultando solo tarifas con la configuración guardada…";
+  try {
+    const { variantId, qty, ...customer } = Object.fromEntries(new FormData(e.currentTarget));
+    const data = await api("/api/admin/envia/rates", {
+      method: "POST",
+      body: JSON.stringify({ version, variantId, qty: Number(qty), customer }),
+    });
+    $("#envia-preview-message").textContent =
+      `${data.environment === "production" ? "Producción: tarifas reales." : "Sandbox: tarifas sin validez para envíos."} ${data.message}`;
+    const money = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
+    for (const rate of data.rates) {
+      $("#envia-preview-results").append(text("p",
+        `${rate.description} (${rate.service}): ${money.format(rate.shippingCents / 100)} MXN` +
+        (rate.deliveryEstimate ? ` · Estimación de transporte: ${rate.deliveryEstimate}` : "")));
+    }
+  } catch (e) {
+    $("#envia-preview-message").textContent = e.message;
+  } finally {
+    button.disabled = !current || !canPreview;
   }
 };
 form.onsubmit = async (e) => {

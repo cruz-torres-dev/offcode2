@@ -259,11 +259,11 @@ Completa estos valores privados en `.env` o en el panel del proveedor de hosting
 - BANK_NAME: banco receptor.
 - BANK_BENEFICIARY: titular real de la cuenta.
 - BANK_CLABE: CLABE real de 18 dígitos.
-- PRIVACY_URL y TERMS_URL: direcciones HTTPS de las páginas reales de privacidad y condiciones de compra de la marca. No se han inventado políticas.
+- PRIVACY_URL y TERMS_URL: enlaces HTTPS opcionales de privacidad y condiciones. Pueden dejarse vacíos sin bloquear pedidos ni envíos y añadirse cuando estén disponibles.
 - PUBLIC_ORIGIN: URL exacta de la tienda; debe ser HTTPS en producción.
 - DATABASE_PATH: ubicación privada del archivo SQLite en almacenamiento persistente.
 
-Confirma también precios, existencias, origen de los envíos, procedimiento para cotizarlos y condiciones de cambios y devoluciones. No actives ventas con datos de ejemplo. Las páginas de privacidad y condiciones deben estar publicadas y revisadas por el propietario.
+Confirma también precios, existencias, origen de los envíos y procedimiento para cotizarlos. No actives ventas con datos de ejemplo. Los enlaces de privacidad y condiciones no son un requisito técnico de activación; el checkout solicita autorización para usar los datos del pedido y su envío.
 
 Cuando todo esté verificado, habilita la recepción en `/settings.html`. Si usas exclusivamente variables iniciales, establece ORDERS_ENABLED=true y reinicia. Si falta la configuración requerida, el servidor rechaza la activación. La bolsa de la página principal permite solicitar pedidos. Mantén WAITLIST_ENABLED=false; la portada VIP ya no se publica.
 
@@ -287,7 +287,7 @@ Para preparar Envia desde el panel:
 2. Pulsa “Consultar estados y comprobar acceso a Envia”. Solo consulta el catálogo: no compra guías ni confirma cobertura o saldo.
 3. Completa el remitente, selecciona el estado del catálogo y añade los pesos/medidas reales por cantidad de prendas. Guarda y habilita Envia para probar localmente.
 4. Comprueba el flujo con sandbox. Para ventas reales cambia a producción y escribe el token de ese entorno; el sistema impide reutilizar silenciosamente el token anterior al cambiar de entorno.
-5. Completa cuenta bancaria, contacto y políticas publicadas, valida la cuenta real y habilita pedidos. Las casillas de preparación verifican campos, no certifican la cuenta ni las condiciones.
+5. Completa cuenta bancaria y contacto, valida la cuenta real y habilita pedidos. Puedes añadir los enlaces de privacidad y condiciones después. Las casillas de preparación verifican campos, no certifican la cuenta ni las condiciones.
 
 Los cambios se aplican sin reiniciar. Guardar invalida cotizaciones anteriores para que se consulten otra vez. Los pedidos cuyo total ya se confirmó conservan la cuenta de transferencia acordada. El token vacío conserva el anterior; retirarlo requiere la casilla correspondiente y desactivar primero Envia. No cambies de cuenta de Envia con guías pendientes de revisión; resuélvelas en la cuenta que las creó.
 

@@ -182,7 +182,7 @@ $("#checkout").onclick = () => {
     return;
   }
   $("#checkout-message").textContent =
-    "Prueba completada. No se creó ningún pedido ni se realizó ningún cobro. Para vender falta habilitar los pedidos por transferencia y configurar la cuenta de Envia.";
+    "La recepción de pedidos no está disponible en este momento. Inténtalo más tarde.";
 };
 renderCart();
 
@@ -246,7 +246,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) video.pause();
 });
 
-// Static previews keep their demo behavior. Only the configured server enables requests.
+// Order reception follows the server configuration.
 fetch("/api/config")
   .then(async (response) => {
     if (!response.ok) return;
@@ -275,7 +275,13 @@ fetch("/api/config")
       if (compare && config.unitCents >= 209900) compare.hidden = true;
       renderCart();
     }
-    if (!config.enabled) return;
+    if (!config.enabled) {
+      $("#product-status").textContent =
+        "La recepción de pedidos está cerrada temporalmente.";
+      $("#cart-mode").textContent =
+        "La recepción de pedidos está cerrada temporalmente. Puedes seguir explorando la colección.";
+      return;
+    }
     ordersEnabled = true;
     // Trust the server list even when empty: a store with no counted stock must
     // not resurrect a saved bag from a fixed fallback.
