@@ -1,0 +1,11 @@
+{
+  "result": "PASS",
+  "mode": "touch",
+  "effects": 6,
+  "maxDuration": 904.9999999999999,
+  "transforms": {
+    "campaign": "none",
+    "product": "none"
+  },
+  "visible": true
+}

@@ -1,5 +1,5 @@
 {
-  "executedAt": "2026-10-17T23:44:51.307Z",
+  "executedAt": "2026-10-18T00:22:49.522Z",
   "scope": "LOCAL loopback, disco temporal, sin CDN; no representa hardware de Render, latencia real, API Envia ni usuarios simultáneos en producción.",
   "node": "v24.14.0",
   "stages": [
@@ -8,17 +8,17 @@
       "requests": 600,
       "concurrency": 50,
       "errors": 0,
-      "elapsedMs": 3483,
-      "p95Ms": 737,
-      "bytes": 7845937
+      "elapsedMs": 1446,
+      "p95Ms": 238,
+      "bytes": 7951043
     },
     {
       "name": "Solicitudes guardadas en SQLite temporal",
       "requests": 120,
       "concurrency": 20,
       "errors": 0,
-      "elapsedMs": 1427,
-      "p95Ms": 266,
+      "elapsedMs": 1099,
+      "p95Ms": 207,
       "bytes": 8160
     },
     {
@@ -26,8 +26,8 @@
       "requests": 120,
       "concurrency": 20,
       "errors": 0,
-      "elapsedMs": 241,
-      "p95Ms": 47,
+      "elapsedMs": 250,
+      "p95Ms": 53,
       "bytes": 8160
     }
   ],

@@ -1,0 +1,193 @@
+
+> offcode-orders@1.0.0 test
+> node --test tests/*.test.mjs
+
+(node:3868) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Vista de verificación: abrir el enlace no consume el token; confirmar verifica y rechaza reutilización (627.3198ms)
+✔ Direcciones: guardar refresca la lista inmediatamente y conserva los datos al recargar (936.7264ms)
+✔ Vista de recuperación: enlace real → formulario → contraseña nueva → login; enlace usado muestra error (2114.745ms)
+✔ La X del modal de Inventario lo cierra (2.8959ms)
+✔ La X del modal de producto también lo cierra (3.4502ms)
+✔ El fondo exterior cierra, pero el contenido y los campos no (2.6576ms)
+✔ Escape queda a cargo del <dialog> nativo y no se intercepta (0.5557ms)
+✔ Se puede abrir y cerrar repetidamente sin acumular listeners (0.7327ms)
+✔ El panel conserva la accesibilidad y el registro de movimientos intactos (59.9775ms)
+(node:9248) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Migraciones versionadas e idempotentes conservan productos y pedidos (657.7955ms)
+✔ Productos: crear, editar, publicar, despublicar y archivar sin perder referencias (230.9197ms)
+✔ SKU duplicado se rechaza al crear y al editar (185.6569ms)
+✔ Inventario por talla y color: entradas, ajustes con motivo y sin negativos (200.3578ms)
+✔ Reserva, pago y cancelación mueven el stock una sola vez (194.2439ms)
+✔ Cancelar antes del pago libera la reserva (173.253ms)
+✔ Dos solicitudes concurrentes por la última unidad: una gana y la otra se rechaza (182.8611ms)
+✔ Protección de inventario del servidor: sin contar no vende, cero y última unidad se rechazan (242.275ms)
+✔ Stock agotado bloquea la venta y el stock sin configurar tampoco se puede comprar ni reservar (261.1487ms)
+✔ La tienda solo ofrece variantes vendibles y marca las agotadas como deshabilitadas (231.0153ms)
+✔ La bolsa rechaza más de 99 prendas en total, aunque cada talla esté dentro del rango (196.413ms)
+✔ Un pedido histórico no cambia al editar o archivar el producto (182.9154ms)
+✔ Sin sesión o desde otro origen no se puede administrar catálogo ni inventario (164.6595ms)
+✔ Solicitud duplicada y fallo de correo no reservan dos veces (171.0106ms)
+✔ Reintentos concurrentes idénticos crean un solo pedido y una sola reserva (195.0089ms)
+✔ Galería usa todas las fotografías del catálogo, conserva orden y soporta listas de otra longitud (356.923ms)
+(node:13616) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Pedidos: el titular ve solo los suyos, con estados persistidos y sin datos inventados (2191.4589ms)
+✔ Pedidos: una cuenta sin verificar no puede consultar historial ni detalle (934.001ms)
+✔ Direcciones: alta, edición, predeterminada única, borrado y aislamiento entre clientes (1674.2928ms)
+✔ Cambio de correo: exige contraseña, verifica la nueva dirección y revoca sesiones (2657.0971ms)
+✔ Preferencias: consentimiento persistente, baja real de la lista VIP y sin publicidad por defecto (600.4808ms)
+✔ Sesiones: cerrar sesión invalida la actual y revocar todas invalida el resto (1025.4166ms)
+✔ Errores de red y de API: mensajes útiles sin datos sensibles ni identificadores del navegador (791.693ms)
+✔ Migración v2→v3 conserva la dirección heredada y no duplica al repetir (66.4336ms)
+(node:17028) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Clientes: registro, normalización, verificación, contraseña con hash y sesiones separadas (1623.6806ms)
+✔ Aislamiento de dos clientes: perfil, dirección y pedidos solo del titular; nada de vínculos por correo histórico (1912.373ms)
+✔ Recuperación: respuesta indistinguible, token de un uso y caducidad, revocación de sesiones (2538.1694ms)
+✔ Correos de cuenta: CTA y URL copiable conservan el enlace real del backend en el origen de producción (528.2178ms)
+✔ Verificación: rechaza token ausente, alterado, de recuperación, reemplazado y vencido sin verificar la cuenta (781.9325ms)
+✔ Recuperación: reemplazar un enlace invalida el anterior; caduca exactamente a los 30 minutos (1950.0506ms)
+✔ Sin correo configurado no se simulan envíos; contacto limitado, CSRF y HTML escapado (148.7478ms)
+✔ Persisten cuentas, identidad, sesión y migraciones en el mismo SQLite al reiniciar (643.0045ms)
+✔ Acceso exclusivamente por correo: endpoints retirados y cuentas previas sin contraseña recuperables (735.9365ms)
+✔ Fallo del correo de cuentas no confirma entregas ni filtra errores; recuperación conserva el mismo mensaje (2027.4836ms)
+✔ Cookies de cliente en producción: prefijo Host, HttpOnly, Secure y sesión revocada al salir (480.9267ms)
+✔ Sesión de cliente: solo hash en SQLite y rechazo de la cookie al cumplir siete días (493.0323ms)
+✔ Migración desde versión 1 añade cuentas sin duplicar catálogo ni tocar pedidos o existencias (43.3305ms)
+(node:8876) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ SQLite privado: configuración explícita y sin fallback de otro motor (7.0361ms)
+✔ El esquema se crea completo, con índices y restricciones, y es idempotente (62.5129ms)
+✔ Dos compradores simultáneos no se llevan la última unidad (39.5325ms)
+✔ Una transacción fallida no deja inventario descontado ni pedido a medias (44.4041ms)
+✔ Reservar, cobrar y cancelar mueven el inventario una sola vez (44.7291ms)
+{"component":"email","code":"disabled"}
+✔ El inventario no admite cantidades negativas ni reservas por encima de existencias (31.5199ms)
+✔ El panel exige sesión, rechaza otro origen y no expone credenciales (452.7906ms)
+✔ Una petición externa espera al rollback de una transacción pausada (4.9972ms)
+✔ Migrar un esquema anterior preserva datos; una versión futura se rechaza sin tocar tablas (6.0853ms)
+✔ Crea el directorio privado y conserva inventario, reserva y movimientos tras reiniciar (43.7845ms)
+(node:7352) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Correo desactivado por defecto, configuración incompleta e inyección de cabeceras (381.2342ms)
+✔ Pedido único: propietario y comprador; transiciones confirmadas; API privada y sin filtraciones (385.3493ms)
+✔ Error del proveedor no pierde ni duplica pedidos; reintento privado usa idéntica clave y cuerpo (288.95ms)
+✔ Timeout y respuestas malformadas nunca se marcan aceptadas; errores no filtran proveedor (20.1727ms)
+✔ Journal durable: reinicio no duplica, reanuda incertidumbre y bloquea reintento después de 23 horas (533.8263ms)
+✔ Arranque inicial omite histórico; direcciones inválidas y estados superados no se envían (1.1322ms)
+✔ El pedido responde sin esperar al proveedor y las plantillas escapan el HTML (175.3301ms)
+✔ Galería dinámica: seis vistas, selección sin recarga y alta resolución solo al abrir (37.7179ms)
+✔ Visor: teclado, zoom 2×, arrastre y vuelta a 1× (9.9953ms)
+✔ Gestos simulados: swipe cambia fotografía, pinch amplía y cancelar no cambia selección (17.2227ms)
+✔ Regresión del visor: miniaturas y contador sincronizados, navegación circular y una sola vista (11.7261ms)
+✔ Marcado público: sin barra superior de zoom y footer definitivo incluso con pedidos habilitados (19.9201ms)
+(node:15636) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"component":"email","code":"disabled"}
+✔ ORDERS_ENABLED=false bloquea los pedidos aunque la configuración guardada los habilite (447.4001ms)
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled","notification":"ce884f27c4d0b9bd7728a5613975a66e1e01e167547e2decd43916ac921203ce","order":"OF-ABFB2E40B69E","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"ad7f448e04ae5bf0998bc733d4bb4757839766ff2631040a8934b40d8022004f","order":"OF-ABFB2E40B69E","state":"skipped","attempts":0}
+{"component":"email","code":"disabled"}
+✔ Sin el interruptor, la configuración guardada habilita la venta y sigue exigiendo existencias contadas (253.6692ms)
+✔ Con el interruptor en false, el arranque no abre ventas aunque se pida enabled:true sin datos completos (100.9945ms)
+(node:17604) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled","notification":"b606d18f752faea869972583454af632c9ccf11375ec123e36c108639f7ee2f8","order":"OF-18657028E0B4","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"9cf52ed9a8be1781fcfa57b3dea86e681083a7dc544974a41b9edb4890ea4fc1","order":"OF-18657028E0B4","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"ea630323191d371bdec72f56d66b3440930ddf90ced8cc54905e143723055340","order":"OF-18657028E0B4","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"a49cea548ba0bc31c7bdddf52bd2b683d4fffb55de9f11e48eab7bed213e3b7a","order":"OF-18657028E0B4","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"da14ff99555fe738900ab0d7abb08d1a281dca23d97a7b77dc5f132fd594b7de","order":"OF-18657028E0B4","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"37251314cb97237b6d4b6bf90337ca3efd1df56a80700a37f17c2dbc5ec4a6dc","order":"OF-18657028E0B4","state":"skipped","attempts":0}
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled"}
+✔ Transferencia manual: solicitud, confirmación, pago, envío y persistencia (705.63ms)
+✔ Ventas desactivadas por defecto y recursos privados fuera del servidor estático (105.2077ms)
+✔ No se habilitan ventas sin configuración completa (7.6934ms)
+(node:11100) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Ficha pública: datos confirmados, seis tallas contempladas y cuatro habilitadas (322.8185ms)
+✔ Catálogo: tallas del TECH PACK no habilitadas se rechazan y no crean pedido (377.9ms)
+✔ Fallo del correo y proveedor de envío no disponible conservan el pedido (273.7253ms)
+✔ FedEx sin configurar: la cotización se bloquea y el pedido no guarda datos de envío (100.0202ms)
+✔ Sin guía de tallas ni medidas: el selector se limita a la venta y no se inventan datos (1.9061ms)
+(node:19012) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled"}
+✔ Configuración privada: borrador cifrado, token oculto, versiones y reinicio (1119.9538ms)
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled"}
+✔ Cambiar contraseña invalida sesiones y persiste sin publicar credenciales (867.6402ms)
+{"component":"email","code":"disabled","notification":"b4a2c7ee06ef2ea7f4e79632d764cccf1194d6301d0cd251012a41a71ef9cdf9","order":"OF-9A5376CB20D0","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"b58b70b73ada65169a3702554a019d05a547c2a8614e274f040a840ce683ac02","order":"OF-9A5376CB20D0","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"cfab0c3f1c39795d21c70c6ba01dd2187243881df18c25d2b24192fe66e41bd1","order":"OF-9A5376CB20D0","state":"skipped","attempts":0}
+✔ La cuenta acordada se conserva al editar la tienda; cerrar ventas bloquea pedidos (274.6846ms)
+✔ Cifrado autenticado: modificar el contenido impide abrir la configuración (4.0171ms)
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled"}
+✔ La búsqueda y los filtros abarcan pedidos fuera de la primera página (217.1451ms)
+✔ Cambiar la configuración invalida tarifas anteriores sin generar guías (225.1096ms)
+(node:13508) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled","notification":"2d7d43f0343987f0774de714b276c643670c33dcbe91fc067c6004a63def4a04","order":"OF-9371106A006D","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"34f9ecac2dfecf8ba070a17dd0d131c83e16d61809e0417245048d57e3adaf21","order":"OF-9371106A006D","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"ecde7ad0d8ecb8750e22d69d4ebd210614f17d243802276538385a942ca88df4","order":"OF-9371106A006D","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"10a5565a2db7f2443cf8d56b4cf7845e46d6706c8f46a3cd9a2dc9f393e5065e","order":"OF-9371106A006D","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"15bb20b910547acf02152b8e605a910d9b6ecaf52bd99eb9ce91bd819607a2ac","order":"OF-9371106A006D","state":"skipped","attempts":0}
+✔ FedEx exclusivo: cotización ligada a datos, total del servidor, compra privada tras transferencia y entrega física (549.3607ms)
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled","notification":"a1d08b00f18634c4722ba5636b23f4d67954d01038939dea53550dcb30e30943","order":"OF-A647C9E20646","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"20b4f57d909e9fdb31962579beb1b6c37ae6d492695e410fc66dce9ea6bf9788","order":"OF-A647C9E20646","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"e5729b780bd0747d477cbb83184f88d36a38bf6c9f2948e3a5ca3011bd91fbf1","order":"OF-A647C9E20646","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"507c8a577cddf693fbbd272be0037f66eb026a626e33abc0bc1f7596abd1361e","order":"OF-A647C9E20646","state":"skipped","attempts":0}
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled"}
+✔ Compra concurrente: una sola llamada; error incierto se conserva tras reinicio y se concilia sin recomprar (712.6298ms)
+✔ Envia: sin cobertura, meta:error HTTP200 y estado inválido nunca producen tarifa ni filtran errores privados (183.9804ms)
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled","notification":"46440db19079a5dc3c9428246fa0b2a1de5dd1cffbc39b64240c413936fcdff7","order":"OF-0E4C134BA528","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"aa890e8ce1fcf75a68f4a8617ead63fd1bba45fef2ba2c90a83500f49305f488","order":"OF-0E4C134BA528","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"683b86d2ec2938b68db0e1dab339a6368909e82a09871fda8cb792a2508cc6db","order":"OF-0E4C134BA528","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"31ade6963502623b0e005d8c5bbc7d6153eff928f652d4d177df9be7fec88411","order":"OF-0E4C134BA528","state":"skipped","attempts":0}
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled"}
+✔ Caducidad y recuperación de intento interrumpido: no se compra de nuevo sin revisión expresa (563.7998ms)
+✔ Configuración incompleta y tarifas de sandbox bloqueadas para ventas en producción (60.7445ms)
+{"component":"email","code":"disabled","notification":"5ace54e857e313485dbcb7a433f59065adf312020682c1a91a7d3373969ab785","order":"OF-F5CAC32104B4","state":"skipped","attempts":0}
+{"component":"email","code":"disabled","notification":"d362c970843080761ead8b8f73206ee1260cdf451fb2412d972f3a24735ae6b4","order":"OF-F5CAC32104B4","state":"skipped","attempts":0}
+✔ El pedido guarda la tarifa validada, el servicio y el estimado de FedEx; ignora el importe del navegador (205.1454ms)
+(node:18328) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled"}
+✔ Render usa su URL asignada al inicio y respeta después el dominio explícito (435.9031ms)
+{"component":"email","code":"disabled"}
+✔ La raíz abre la tienda y las páginas de registro VIP ya no se publican (62.0253ms)
+{"component":"email","code":"disabled"}
+✔ Caché solo de catálogo y recursos públicos, revalidación ETag y API/checkout/panel privados (222.3904ms)
+✔ Límites detrás de Render: IP real validada; encabezados ignorados en acceso directo (70.3777ms)
+(node:9472) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled"}
+{"component":"email","code":"disabled"}
+✔ Lista VIP independiente: consentimiento, duplicados, acceso privado, baja y persistencia (468.7ms)
+{"component":"email","code":"disabled"}
+✔ Exportación CSV neutraliza fórmulas en correos y requiere sesión (136.9939ms)
+✔ Registro cerrado por defecto y configuración VIP sin datos bancarios (77.9202ms)
+ℹ tests 98
+ℹ suites 0
+ℹ pass 98
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 14382.8885

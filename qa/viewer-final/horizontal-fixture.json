@@ -1,0 +1,52 @@
+{
+  "controls": [
+    {
+      "centerError": 0.0078125,
+      "height": 48,
+      "hit": true,
+      "inside": true,
+      "selector": "#viewer-prev",
+      "width": 48,
+      "x": 8,
+      "y": 143.796875
+    },
+    {
+      "centerError": 0.0078125,
+      "height": 48,
+      "hit": true,
+      "inside": true,
+      "selector": "#viewer-next",
+      "width": 48,
+      "x": 584,
+      "y": 143.796875
+    },
+    {
+      "centerError": null,
+      "height": 44,
+      "hit": true,
+      "inside": true,
+      "selector": "#product-modal .close",
+      "width": 44,
+      "x": 588,
+      "y": 8
+    }
+  ],
+  "height": 360,
+  "image": {
+    "fit": "contain",
+    "height": 767,
+    "width": 860
+  },
+  "modal": {
+    "bottom": 360,
+    "height": 360,
+    "left": 0,
+    "right": 640,
+    "top": 0,
+    "width": 640,
+    "x": 0,
+    "y": 0
+  },
+  "overflow": false,
+  "width": 640
+}

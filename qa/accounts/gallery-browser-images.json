@@ -1,0 +1,30 @@
+[
+  {
+    "fit": "contain",
+    "height": 960,
+    "loaded": true,
+    "src": "assets/product-front-main.webp",
+    "width": 960
+  },
+  {
+    "fit": "contain",
+    "height": 960,
+    "loaded": true,
+    "src": "assets/product-back-main.webp",
+    "width": 960
+  },
+  {
+    "fit": "contain",
+    "height": 1280,
+    "loaded": true,
+    "src": "assets/product-detail-main.webp",
+    "width": 960
+  },
+  {
+    "fit": "contain",
+    "height": 1280,
+    "loaded": true,
+    "src": "assets/product-packaging-main.webp",
+    "width": 960
+  }
+]

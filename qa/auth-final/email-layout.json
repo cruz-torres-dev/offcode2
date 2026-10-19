@@ -1,0 +1,74 @@
+[
+  {
+    "background": "rgb(255, 255, 255)",
+    "color": "rgb(8, 8, 8)",
+    "copyable": true,
+    "ctaHeight": 56,
+    "ctaWidth": 242,
+    "equalLinks": true,
+    "fallbackFits": true,
+    "overflow": false,
+    "title": "Verifica tu correo",
+    "width": 320
+  },
+  {
+    "background": "rgb(255, 255, 255)",
+    "color": "rgb(8, 8, 8)",
+    "copyable": true,
+    "ctaHeight": 78,
+    "ctaWidth": 242,
+    "equalLinks": true,
+    "fallbackFits": true,
+    "overflow": false,
+    "title": "Restablece tu contraseña",
+    "width": 320
+  },
+  {
+    "background": "rgb(255, 255, 255)",
+    "color": "rgb(8, 8, 8)",
+    "copyable": true,
+    "ctaHeight": 56,
+    "ctaWidth": 312,
+    "equalLinks": true,
+    "fallbackFits": true,
+    "overflow": false,
+    "title": "Verifica tu correo",
+    "width": 390
+  },
+  {
+    "background": "rgb(255, 255, 255)",
+    "color": "rgb(8, 8, 8)",
+    "copyable": true,
+    "ctaHeight": 56,
+    "ctaWidth": 312,
+    "equalLinks": true,
+    "fallbackFits": true,
+    "overflow": false,
+    "title": "Restablece tu contraseña",
+    "width": 390
+  },
+  {
+    "background": "rgb(255, 255, 255)",
+    "color": "rgb(8, 8, 8)",
+    "copyable": true,
+    "ctaHeight": 56,
+    "ctaWidth": 554,
+    "equalLinks": true,
+    "fallbackFits": true,
+    "overflow": false,
+    "title": "Verifica tu correo",
+    "width": 1280
+  },
+  {
+    "background": "rgb(255, 255, 255)",
+    "color": "rgb(8, 8, 8)",
+    "copyable": true,
+    "ctaHeight": 56,
+    "ctaWidth": 554,
+    "equalLinks": true,
+    "fallbackFits": true,
+    "overflow": false,
+    "title": "Restablece tu contraseña",
+    "width": 1280
+  }
+]

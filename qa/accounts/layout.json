@@ -1,0 +1,34 @@
+[
+  {
+    "actionOverlap": false,
+    "contentWidth": 305,
+    "header": "rgb(8, 8, 8)",
+    "logoOffset": 0,
+    "scrollWidth": 305,
+    "viewport": 320
+  },
+  {
+    "actionOverlap": false,
+    "contentWidth": 375,
+    "header": "rgb(8, 8, 8)",
+    "logoOffset": 0,
+    "scrollWidth": 375,
+    "viewport": 390
+  },
+  {
+    "actionOverlap": false,
+    "contentWidth": 753,
+    "header": "rgb(8, 8, 8)",
+    "logoOffset": 0,
+    "scrollWidth": 753,
+    "viewport": 768
+  },
+  {
+    "actionOverlap": false,
+    "contentWidth": 1425,
+    "header": "rgb(8, 8, 8)",
+    "logoOffset": 0,
+    "scrollWidth": 1425,
+    "viewport": 1440
+  }
+]
