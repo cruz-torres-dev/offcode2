@@ -3,24 +3,45 @@
   const $ = (s) => document.querySelector(s);
   const modal = $("#product-modal"), viewport = $("#zoom-viewport"), image = $("#zoom-image");
   const main = $("#gallery-main"), open = $("#product-open"), thumbs = $(".gallery-thumbs"), viewerThumbs = $("#viewer-thumbs");
-  let media = {}, photos = [], index = 0, scale = 1, savedScroll = 0, drag = null, gesture = null, suppressClick = false;
+  let media = {}, photos = [], index = 0, scale = 1, x = 0, y = 0, savedScroll = 0, drag = null, gesture = null, suppressClick = false;
   const pointers = new Map();
   const safeSource = (src) => typeof src === "string" && /^assets\/[A-Za-z0-9._-]+\.(jpg|jpeg|png|webp|avif)$/i.test(src);
   const source = (photo, kind) => media[photo.src]?.[kind] || photo.src;
-  function zoom(value, point = null) {
-    const previous = scale;
-    const rect = viewport.getBoundingClientRect();
-    const x = point ? point.x - rect.left : viewport.clientWidth / 2;
-    const y = point ? point.y - rect.top : viewport.clientHeight / 2;
-    const contentX = (viewport.scrollLeft + x) / previous;
-    const contentY = (viewport.scrollTop + y) / previous;
-    scale = Math.max(1, Math.min(2, value));
+  function bounds() {
+    const width = image.naturalWidth || image.width || 1080, height = image.naturalHeight || image.height || 1080;
+    const fit = Math.min(viewport.clientWidth / width, viewport.clientHeight / height);
+    return { width: width * fit, height: height * fit, max: Math.max(1, Math.min(4, 1 / fit)) };
+  }
+  function paintZoom() {
+    const fitted = bounds();
+    scale = Math.max(1, Math.min(fitted.max, scale));
+    const limitX = Math.max(0, (fitted.width * scale - viewport.clientWidth) / 2);
+    const limitY = Math.max(0, (fitted.height * scale - viewport.clientHeight) / 2);
+    x = scale === 1 ? 0 : Math.max(-limitX, Math.min(limitX, x));
+    y = scale === 1 ? 0 : Math.max(-limitY, Math.min(limitY, y));
     viewport.style.setProperty("--photo-scale", scale);
+    viewport.style.setProperty("--photo-x", x + "px");
+    viewport.style.setProperty("--photo-y", y + "px");
     viewport.classList.toggle("is-zoomed", scale > 1);
     viewport.setAttribute("aria-pressed", String(scale > 1));
     viewport.setAttribute("aria-label", scale > 1 ? "Restablecer fotografía; arrastra para recorrer" : "Ampliar fotografía");
-    viewport.scrollLeft = scale > 1 ? contentX * scale - x : 0;
-    viewport.scrollTop = scale > 1 ? contentY * scale - y : 0;
+  }
+  function local(point) {
+    const rect = viewport.getBoundingClientRect();
+    return { x: point.x - rect.left - viewport.clientWidth / 2, y: point.y - rect.top - viewport.clientHeight / 2 };
+  }
+  function zoom(value, point = null) {
+    const anchor = point ? local(point) : { x: 0, y: 0 };
+    const next = Math.max(1, Math.min(bounds().max, value));
+    x = anchor.x - (anchor.x - x) * next / scale;
+    y = anchor.y - (anchor.y - y) * next / scale;
+    scale = next; paintZoom();
+  }
+  function clearPointers() {
+    const captured = [...pointers.keys()];
+    pointers.clear(); drag = gesture = null;
+    for (const id of captured) if (viewport.hasPointerCapture(id)) viewport.releasePointerCapture(id);
+    viewport.classList.remove("is-dragging");
   }
   function updateViewer() {
     if (!modal.open || !photos.length) return;
@@ -32,7 +53,8 @@
     zoom(1);
   }
   function show(next) {
-    if (!photos.length) return;
+    if (!photos.length || (gesture && pointers.size)) return;
+    clearPointers();
     index = (next + photos.length) % photos.length;
     const p = photos[index];
     main.src = source(p, "main"); main.alt = p.alt;
@@ -81,39 +103,52 @@
     if (!photos.length) return;
     savedScroll = window.scrollY;
     modal.showModal(); document.documentElement.classList.add("product-viewer-open");
+    listenForGestures(true);
     updateViewer(); modal.querySelector(".close").focus({ preventScroll: true });
   };
   modal.addEventListener("close", () => {
     document.documentElement.classList.remove("product-viewer-open");
-    pointers.clear(); drag = gesture = null; zoom(1);
+    listenForGestures(false); clearPointers(); suppressClick = false; zoom(1);
     window.scrollTo({ top: savedScroll, behavior: "instant" }); open.focus({ preventScroll: true });
   });
   viewport.addEventListener("click", (event) => {
-    if (!suppressClick) zoom(scale > 1 ? 1 : 2, Number.isFinite(event.clientX) && event.detail !== 0 ? { x: event.clientX, y: event.clientY } : null);
+    if (modal.open && !pointers.size && !suppressClick) zoom(scale > 1 ? 1 : 2, Number.isFinite(event.clientX) && event.detail !== 0 ? { x: event.clientX, y: event.clientY } : null);
     suppressClick = false;
   });
   image.addEventListener("dragstart", (e) => e.preventDefault());
+  image.addEventListener("load", () => { if (modal.open) paintZoom(); });
   const distance = () => { const [a, b] = [...pointers.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
-  viewport.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    suppressClick = false;
+  const midpoint = () => { const [a, b] = [...pointers.values()]; return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; };
+  function start(e) {
+    if (e.button !== 0 || pointers.size >= 2) return;
+    if (!pointers.size) suppressClick = false;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     viewport.setPointerCapture(e.pointerId); viewport.focus({ preventScroll: true });
-    drag = { x: e.clientX, y: e.clientY, left: viewport.scrollLeft, top: viewport.scrollTop, moved: false };
-    if (pointers.size === 2) { gesture = { distance: distance(), scale }; suppressClick = true; }
-  });
-  viewport.addEventListener("pointermove", (e) => {
+    drag = { x: e.clientX, y: e.clientY, offsetX: x, offsetY: y, moved: false };
+    if (pointers.size === 2) {
+      const center = local(midpoint());
+      gesture = { distance: Math.max(distance(), 1), scale, anchorX: (center.x - x) / scale, anchorY: (center.y - y) / scale };
+      suppressClick = true;
+    }
+  }
+  function move(e) {
     if (!pointers.has(e.pointerId)) return;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pointers.size === 2 && gesture) { zoom(gesture.scale * distance() / Math.max(gesture.distance, 1)); suppressClick = true; return; }
+    if (pointers.size === 2 && gesture) {
+      const center = local(midpoint());
+      scale = Math.max(1, Math.min(bounds().max, gesture.scale * distance() / gesture.distance));
+      x = center.x - gesture.anchorX * scale; y = center.y - gesture.anchorY * scale;
+      paintZoom(); suppressClick = true; return;
+    }
     if (!drag) return;
     if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8) drag.moved = suppressClick = true;
     if (scale > 1) {
       viewport.classList.add("is-dragging");
-      viewport.scrollLeft = drag.left + drag.x - e.clientX;
-      viewport.scrollTop = drag.top + drag.y - e.clientY;
+      x = drag.offsetX + e.clientX - drag.x;
+      y = drag.offsetY + e.clientY - drag.y;
+      paintZoom();
     }
-  });
+  }
   function end(e) {
     if (!pointers.has(e.pointerId)) return;
     if (!gesture && scale === 1 && drag?.moved && e.type === "pointerup") {
@@ -121,10 +156,24 @@
       if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.3) show(index + (dx < 0 ? 1 : -1));
     }
     pointers.delete(e.pointerId); drag = null;
+    if (viewport.hasPointerCapture(e.pointerId)) viewport.releasePointerCapture(e.pointerId);
     if (!pointers.size) gesture = null;
+    else {
+      // Keep the pinch flag until all fingers lift: the remaining finger may
+      // pan immediately, but cannot accidentally swipe or toggle zoom.
+      const remaining = [...pointers.values()][0];
+      drag = { x: remaining.x, y: remaining.y, offsetX: x, offsetY: y, moved: false };
+    }
+    if (e.type !== "pointerup") suppressClick = true;
     viewport.classList.remove("is-dragging");
   }
-  for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) viewport.addEventListener(event, end);
+  function resize() { clearPointers(); zoom(1); }
+  function listenForGestures(enabled) {
+    const method = enabled ? "addEventListener" : "removeEventListener";
+    for (const [event, handler] of [["pointerdown", start], ["pointermove", move], ["pointerup", end], ["pointercancel", end], ["lostpointercapture", end]]) viewport[method](event, handler);
+    window[method]("resize", resize);
+    window.visualViewport?.[method]("resize", resize);
+  }
   modal.addEventListener("keydown", (e) => {
     // Preserve native editing controls and browser navigation shortcuts.
     if (e.altKey || e.ctrlKey || e.metaKey || ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName) || e.target.isContentEditable) return;
@@ -133,8 +182,9 @@
     if (!["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown"].includes(e.key)) return;
     if (scale > 1 && e.target === viewport && e.shiftKey) {
       e.preventDefault();
-      viewport.scrollLeft += e.key === "ArrowRight" ? 70 : e.key === "ArrowLeft" ? -70 : 0;
-      viewport.scrollTop += e.key === "ArrowDown" ? 70 : e.key === "ArrowUp" ? -70 : 0;
+      x += e.key === "ArrowRight" ? -70 : e.key === "ArrowLeft" ? 70 : 0;
+      y += e.key === "ArrowDown" ? -70 : e.key === "ArrowUp" ? 70 : 0;
+      paintZoom();
     } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); show(index + (e.key === "ArrowRight" ? 1 : -1)); }
   });
 })();

@@ -20,13 +20,16 @@ class Element {
   getAttribute(k) { return this.attrs[k] ?? null; }
   removeAttribute(k) { delete this.attrs[k]; delete this[k]; }
   addEventListener(k, fn) { (this.events[k] ??= []).push(fn); }
+  removeEventListener(k, fn) { this.events[k] = (this.events[k] || []).filter((handler) => handler !== fn); }
   emit(type, args = {}) { const event = { type, target: this, button: 0, preventDefault() {}, ...args }; for (const fn of this.events[type] || []) fn(event); }
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = children; }
   querySelector(s) { return this.parts?.[s] || this.children.find((x) => x.tag === s); }
   querySelectorAll(s) { return this.children.filter((x) => x.tag === s); }
   focus() { this.document.activeElement = this; }
-  setPointerCapture() {}
+  setPointerCapture(id) { (this.captured ??= new Set()).add(id); }
+  hasPointerCapture(id) { return this.captured?.has(id) || false; }
+  releasePointerCapture(id) { this.captured?.delete(id); }
   scrollIntoView() {}
   getBoundingClientRect() { return { left: 0, top: 0 }; }
   showModal() { this.open = true; }
@@ -42,7 +45,7 @@ async function fixture() {
   for (const e of Object.values(elements)) e.document = doc;
   elements["#product-modal"].parts = { h2: new Element(), ".close": doc.createElement("button") };
   const manifest = JSON.parse(await readFile(new URL("../dist/assets/product-media.json", import.meta.url)));
-  const win = { scrollY: 456, scrollTo: ({ top }) => { win.scrollY = top; } };
+  const win = new Element(); win.scrollY = 456; win.scrollTo = ({ top }) => { win.scrollY = top; };
   vm.runInNewContext(code, { document: doc, window: win, fetch: async () => ({ ok: true, json: async () => manifest }) });
   await new Promise((r) => setImmediate(r));
   const product = (images) => doc.emit("offcode:product", { detail: { name: "Prenda", images } });
@@ -75,10 +78,10 @@ test("Visor: teclado, zoom 2×, arrastre y vuelta a 1×", async () => {
   modal.emit("keydown", { key: "+" }); assert.equal(v.attrs["--photo-scale"], 2);
   v.emit("pointerdown", { pointerId: 1, clientX: 200, clientY: 200 });
   v.emit("pointermove", { pointerId: 1, clientX: 100, clientY: 120 });
-  assert.equal(v.scrollLeft, 350); assert.equal(v.scrollTop, 330);
+  assert.equal(v.attrs["--photo-x"], "-100px"); assert.equal(v.attrs["--photo-y"], "-80px");
   v.emit("pointerup", { pointerId: 1, clientX: 100, clientY: 120 });
   v.emit("click"); assert.equal(v.attrs["--photo-scale"], 2, "arrastre no activa el clic de zoom");
-  modal.emit("keydown", { key: "ArrowRight", target: v, shiftKey: true }); assert.equal(v.scrollLeft, 420);
+  modal.emit("keydown", { key: "ArrowRight", target: v, shiftKey: true }); assert.equal(v.attrs["--photo-x"], "-170px");
   modal.emit("keydown", { key: "0" }); assert.equal(v.attrs["--photo-scale"], 1);
   v.emit("click"); assert.equal(v.getAttribute("aria-pressed"), "true");
   e["#product-modal"].emit("keydown", { key: "0" }); assert.equal(v.attrs["--photo-scale"], 1);
@@ -96,6 +99,83 @@ test("Gestos simulados: swipe cambia fotografía, pinch amplía y cancelar no ca
   e["#product-modal"].emit("keydown", { key: "0" });
   pointer("pointerdown", 1, 200); pointer("pointermove", 1, 90); pointer("pointercancel", 1, 90);
   assert.equal(e["#zoom-image"].alt, "Espalda");
+});
+
+test("Pinch: sigue el punto entre los dedos y vuelve a 1× centrado sin activar un clic", async () => {
+  const { elements: e, product } = await fixture();
+  product([{ src: "assets/product-front.jpg", alt: "Frente" }]);
+  e["#product-open"].onclick(); const v = e["#zoom-viewport"];
+  const pointer = (type, id, x, y = 150) => v.emit(type, { pointerId: id, pointerType: "touch", clientX: x, clientY: y });
+  pointer("pointerdown", 1, 100); pointer("pointerdown", 2, 200);
+  pointer("pointermove", 2, 300);
+  assert.equal(v.attrs["--photo-scale"], 2);
+  assert.equal(v.attrs["--photo-x"], "150px"); assert.equal(v.attrs["--photo-y"], "100px");
+  // The initial image point under the midpoint remains under its new position.
+  assert.equal(250 + (150 - 250) * 2 + parseFloat(v.attrs["--photo-x"]), 200);
+  pointer("pointermove", 2, 150);
+  assert.equal(v.attrs["--photo-scale"], 1);
+  assert.equal(v.attrs["--photo-x"], "0px"); assert.equal(v.attrs["--photo-y"], "0px");
+  pointer("pointerup", 2, 150); pointer("pointerup", 1, 100);
+  v.emit("click", { clientX: 100, clientY: 150, detail: 1 });
+  assert.equal(v.attrs["--photo-scale"], 1, "el clic posterior al pinch no vuelve a ampliar");
+});
+
+test("Pinch: mover el centro y continuar con un dedo permite arrastrar sin cambiar de foto", async () => {
+  const { elements: e, product } = await fixture();
+  product([{ src: "assets/product-front.jpg", alt: "Frente" }, { src: "assets/product-back.jpg", alt: "Espalda" }]);
+  e["#product-open"].onclick(); const v = e["#zoom-viewport"];
+  const pointer = (type, id, x) => v.emit(type, { pointerId: id, pointerType: "touch", clientX: x, clientY: 200 });
+  pointer("pointerdown", 1, 150); pointer("pointerdown", 2, 250);
+  pointer("pointermove", 1, 100); pointer("pointermove", 2, 300);
+  pointer("pointermove", 1, 120); pointer("pointermove", 2, 320);
+  assert.equal(v.attrs["--photo-scale"], 2); assert.equal(v.attrs["--photo-x"], "70px");
+  e["#viewer-next"].onclick(); assert.equal(e["#zoom-image"].alt, "Frente", "no navega durante el pinch");
+  pointer("pointerup", 2, 320); pointer("pointermove", 1, 80);
+  assert.equal(v.attrs["--photo-x"], "30px", "el dedo restante arrastra desde su posición actual");
+  pointer("pointerup", 1, 80); v.emit("click");
+  assert.equal(e["#zoom-image"].alt, "Frente"); assert.equal(v.attrs["--photo-scale"], 2);
+  e["#viewer-next"].onclick();
+  assert.equal(e["#zoom-image"].alt, "Espalda"); assert.equal(v.attrs["--photo-scale"], 1);
+  assert.equal(v.attrs["--photo-x"], "0px"); assert.equal(v.attrs["--photo-y"], "0px");
+});
+
+test("Zoom: límite según píxeles disponibles, máximo 4× y arrastre acotado a la fotografía", async () => {
+  const { elements: e, product } = await fixture();
+  product([{ src: "assets/product-front.jpg", alt: "Frente" }]);
+  e["#product-open"].onclick(); const v = e["#zoom-viewport"], image = e["#zoom-image"];
+  v.clientWidth = 320; v.clientHeight = 844;
+  image.naturalWidth = image.naturalHeight = 1080;
+  const pointer = (type, id, x, y = 422) => v.emit(type, { pointerId: id, pointerType: "touch", clientX: x, clientY: y });
+  pointer("pointerdown", 1, 100); pointer("pointerdown", 2, 200); pointer("pointermove", 2, 2000);
+  assert.equal(v.attrs["--photo-scale"], 1080 / 320);
+  pointer("pointerup", 2, 2000); pointer("pointerup", 1, 100);
+  pointer("pointerdown", 1, 100); pointer("pointermove", 1, -3000, -3000);
+  assert.equal(v.attrs["--photo-x"], "-380px"); assert.equal(v.attrs["--photo-y"], "-118px");
+  pointer("pointerup", 1, -3000, -3000);
+  image.naturalWidth = image.naturalHeight = 4000;
+  pointer("pointerdown", 1, 100); pointer("pointerdown", 2, 200); pointer("pointermove", 2, 2000);
+  assert.equal(v.attrs["--photo-scale"], 4);
+});
+
+test("Cerrar, cancelar y redimensionar liberan punteros sin acumular eventos", async () => {
+  const { elements: e, product, win } = await fixture();
+  product([{ src: "assets/product-front.jpg", alt: "Frente" }]);
+  const v = e["#zoom-viewport"], modal = e["#product-modal"];
+  for (let i = 0; i < 3; i++) {
+    e["#product-open"].onclick();
+    assert.equal(v.events.pointerdown.length, 1);
+    v.emit("pointerdown", { pointerId: 1, clientX: 100, clientY: 100 });
+    v.emit("pointerdown", { pointerId: 2, clientX: 200, clientY: 100 });
+    v.emit("pointermove", { pointerId: 2, clientX: 300, clientY: 100 });
+    win.emit("resize");
+    assert.equal(v.attrs["--photo-scale"], 1); assert.equal(v.captured.size, 0);
+    v.emit("pointerdown", { pointerId: 3, clientX: 100, clientY: 100 });
+    modal.close();
+    assert.equal(v.captured.size, 0); assert.equal(v.events.pointerdown.length, 0); assert.equal(win.events.resize.length, 0);
+    v.emit("pointerdown", { pointerId: 1, clientX: 100, clientY: 100 });
+    v.emit("pointermove", { pointerId: 1, clientX: 300, clientY: 100 });
+    assert.equal(v.attrs["--photo-scale"], 1, "cerrado no procesa gestos");
+  }
 });
 
 
@@ -119,7 +199,7 @@ test("Regresión del visor: miniaturas y contador sincronizados, navegación cir
   modal.emit("keydown", { key: "Enter", target: v }); assert.equal(v.attrs["--photo-scale"], 2);
   modal.emit("keydown", { key: " ", target: v }); assert.equal(v.attrs["--photo-scale"], 1);
   v.emit("click", { clientX: 100, clientY: 150, detail: 1 });
-  assert.equal(v.scrollLeft, 100); assert.equal(v.scrollTop, 150);
+  assert.equal(v.attrs["--photo-x"], "150px"); assert.equal(v.attrs["--photo-y"], "100px");
   modal.emit("keydown", { key: "ArrowRight", target: v });
   assert.equal(e["#zoom-image"].alt, "Vista 1", "flecha normal navega incluso después de ampliar");
   assert.equal(v.attrs["--photo-scale"], 1);
