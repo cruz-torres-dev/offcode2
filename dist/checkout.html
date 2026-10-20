@@ -18,11 +18,11 @@
     </header>
     <main class="checkout-layout">
       <section class="checkout-content">
-        <p class="eyebrow">COLECCIÓN / DATOS / ENVÍO</p>
-        <h1>Completa tu solicitud.</h1>
-        <p class="intro">
-          Elige tu envío y revisa el total. OFFCODE confirmará disponibilidad
-          antes de solicitarte la transferencia.
+        <p class="eyebrow checkout-steps">COLECCIÓN / DATOS / ENVÍO</p>
+        <h1 id="checkout-title">Completa tu pedido.</h1>
+        <p class="intro checkout-intro">
+          Elige tu envío y acepta el total. Al confirmar tu pedido reservamos
+          tus prendas y te mostramos los datos para transferir.
         </p>
         <p id="availability" class="message" role="status">
           Comprobando recepción de pedidos…
@@ -129,7 +129,7 @@
             <label class="payment-option">
               <input id="payment-transfer" name="paymentMethod" type="radio" value="bank_transfer" checked required disabled />
               <span class="payment-icon" aria-hidden="true">↗</span>
-              <span><strong>Transferencia bancaria</strong><span>Paga mediante transferencia bancaria después de que confirmemos la disponibilidad de tu pedido.</span><small>No se realiza ningún cobro al enviar la solicitud. El pago se verifica manualmente.</small></span>
+              <span><strong>Transferencia bancaria</strong><span>Al confirmar tu pedido verás los datos bancarios, el total exacto y el concepto para transferir.</span><small>No hay cobro automático. OFFCODE verifica cada transferencia manualmente antes de preparar el envío.</small></span>
             </label>
           </fieldset>
           <section class="checkout-review" aria-labelledby="review-heading">
@@ -141,31 +141,63 @@
               <div class="review-grand-total"><dt>Total <small>MXN</small></dt><dd id="review-total">Por calcular</dd></div>
             </dl>
             <label class="check total-acceptance"><input id="accept-total" name="totalAcceptance" type="checkbox" required disabled /><span id="accept-total-label">Elige un servicio para revisar y aceptar el total completo.</span></label>
-            <button class="primary" id="submit-order" disabled>Enviar solicitud de pedido →</button>
+            <button class="primary" id="submit-order" disabled>Confirmar pedido y ver datos de transferencia →</button>
           </section>
           <p class="fine">
-            Confirmaremos disponibilidad antes de compartir los datos bancarios.
-            Enviar esta solicitud no confirma inventario ni realiza un cobro.
+            Al confirmar, tu pedido se guarda una sola vez, reservamos tus
+            prendas y te mostramos los datos bancarios. El pago se confirma
+            solo después de que OFFCODE verifique el depósito en el banco.
           </p>
         </form>
-        <section id="order-success" hidden tabindex="-1">
-          <h2>Solicitud recibida.</h2>
-          <p id="order-reference"></p>
-          <button id="copy-order-reference" type="button">Copiar referencia</button>
-          <p id="order-copy-status" class="fine" role="status"></p>
-          <p>
-            Guarda esta referencia y el total de tu solicitud. Confirmaremos
-            disponibilidad antes de compartir los datos para transferir.
-            Si hace falta actualizar el envío, te pediremos revisar el nuevo
-            total antes de pagar. No transfieras todavía.
-          </p>
-          <a id="whatsapp-order" class="primary" target="_blank" rel="noopener"
-            >Continuar por WhatsApp ↗</a
-          >
-          <p><a id="support-order" href="contacto.html">Contactar sobre este pedido ↗</a></p>
+        <section id="order-success" class="transfer-panel" hidden tabindex="-1" aria-labelledby="transfer-heading">
+          <p id="transfer-eyebrow" class="eyebrow">PEDIDO REGISTRADO · PAGO PENDIENTE DE VERIFICAR</p>
+          <h2 id="transfer-heading">Realiza tu transferencia bancaria</h2>
+          <p id="order-reference" class="transfer-reference"></p>
+          <p id="transfer-state" class="transfer-state" role="status"></p>
+          <p class="fine">Para regresar a este pedido después de cerrar el navegador, usa «Consultar mi pedido» en el correo de confirmación. El enlace es privado y tiene caducidad. Si no recibes el correo, conserva tu referencia y contacta a OFFCODE.</p>
+          <div id="transfer-instructions" hidden>
+            <p class="transfer-lead">
+              Transfiere exactamente el total a esta cuenta y escribe el
+              concepto tal como aparece para que podamos identificar tu pago.
+            </p>
+            <dl class="transfer-details">
+              <div><dt>Titular</dt><dd id="transfer-beneficiary"></dd></div>
+              <div><dt>Banco</dt><dd id="transfer-bank"></dd></div>
+              <div><dt>CLABE</dt><dd><span id="transfer-clabe" class="transfer-code"></span><button type="button" id="copy-clabe" class="copy-button">Copiar CLABE</button></dd></div>
+              <div class="transfer-total"><dt>Total exacto</dt><dd id="transfer-total"></dd></div>
+              <div><dt>Concepto</dt><dd><span id="transfer-concept" class="transfer-code"></span><button type="button" id="copy-concept" class="copy-button">Copiar concepto</button></dd></div>
+              <div><dt>Referencia del pedido</dt><dd><span id="transfer-reference" class="transfer-code"></span><button type="button" id="copy-order-reference" class="copy-button">Copiar referencia</button></dd></div>
+            </dl>
+            <p id="order-copy-status" class="fine" role="status"></p>
+            <p class="fine">
+              Tus prendas quedaron reservadas. No hay cobros automáticos:
+              OFFCODE verifica cada transferencia manualmente antes de preparar
+              y enviar tu pedido.
+            </p>
+          </div>
+          <div id="transfer-report" class="transfer-report" hidden>
+            <button type="button" id="report-transfer" class="primary" aria-expanded="false" aria-controls="report-confirm">Ya realicé la transferencia</button>
+            <p class="fine">
+              Al avisarnos, revisaremos el depósito directamente en el banco.
+              Este aviso no confirma que el pago haya sido recibido.
+            </p>
+            <div id="report-confirm" class="report-confirm" hidden>
+              <p id="report-confirm-text"></p>
+              <div class="report-actions">
+                <button type="button" id="report-confirm-yes" class="primary">Sí, ya transferí. Enviar aviso</button>
+                <button type="button" id="report-cancel">Todavía no</button>
+              </div>
+            </div>
+          </div>
+          <p id="report-status" class="message" role="status" tabindex="-1" hidden></p>
+          <div class="transfer-support">
+            <a href="index.html#collection">Iniciar una nueva solicitud ↗</a>
+            <a id="whatsapp-order" target="_blank" rel="noopener">Escribir por WhatsApp ↗</a>
+            <a id="support-order" href="contacto.html">Contactar sobre este pedido ↗</a>
+          </div>
           <p class="fine">
-            Este enlace abre un mensaje preparado. Tú decides cuándo enviarlo.
-            No se ha enviado ningún mensaje automáticamente.
+            El enlace de WhatsApp abre un mensaje preparado. Tú decides cuándo
+            enviarlo; no se envía nada automáticamente.
           </p>
         </section>
       </section>
@@ -179,8 +211,8 @@
           <div class="summary-grand-total"><dt>Total</dt><dd><small>MXN</small> <span id="summary-total">Por calcular</span></dd></div>
         </dl>
         <p id="shipping-summary" class="fine">Completa tu dirección y calcula el envío para conocer el total.</p>
-        <div class="summary-payment"><span aria-hidden="true">↗</span><div><strong>Pago por transferencia</strong><p>Esta es una solicitud. No se realiza ningún cobro al enviarla.</p></div></div>
-        <a class="edit-bag" href="index.html#cart">Editar mi bolsa ↗</a>
+        <div class="summary-payment"><span aria-hidden="true">↗</span><div><strong>Pago por transferencia</strong><p>Sin cobro automático. OFFCODE verifica cada transferencia manualmente.</p></div></div>
+        <a class="edit-bag" id="edit-bag" href="index.html#cart">Editar mi bolsa ↗</a>
       </aside>
     </main>
     <footer>OFFCODE™ · Transferencias verificadas manualmente · <a href="privacidad.html" data-privacy-link>Política de privacidad</a></footer>

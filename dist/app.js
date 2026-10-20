@@ -312,14 +312,25 @@ fetch("/api/config")
         }));
     } catch {}
     renderCart();
-    $("#checkout").textContent = "Solicitar pedido →";
-    $("#cart-mode").textContent =
-      "Confirmaremos disponibilidad y envío antes de solicitar la transferencia.";
-    $("#subtotal-note").textContent =
-      "Envío por confirmar. No transfieras hasta recibir el total final.";
-    $("#product-status").textContent =
-      "Disponibilidad y envío sujetos a confirmación. Pago por transferencia.";
-    $("#selection-note").textContent = "— confirma disponibilidad al solicitar";
+    if (config.shipping?.enabled) {
+      $("#checkout").textContent = "Continuar con mi pedido →";
+      $("#cart-mode").textContent =
+        "En el siguiente paso cotizas el envío FedEx. Al confirmar tu pedido verás el total exacto y los datos para transferir.";
+      $("#subtotal-note").textContent =
+        "Envío por calcular. Transfiere solo el total que veas al confirmar tu pedido.";
+      $("#product-status").textContent =
+        "Envío FedEx cotizado en el checkout. Pago por transferencia, verificado en el banco.";
+      $("#selection-note").textContent = "— existencias validadas al confirmar el pedido";
+    } else {
+      $("#checkout").textContent = "Solicitar pedido →";
+      $("#cart-mode").textContent =
+        "Confirmaremos disponibilidad y envío antes de solicitar la transferencia.";
+      $("#subtotal-note").textContent =
+        "Envío por confirmar. No transfieras hasta recibir el total final.";
+      $("#product-status").textContent =
+        "Disponibilidad y envío sujetos a confirmación. Pago por transferencia.";
+      $("#selection-note").textContent = "— confirma disponibilidad al solicitar";
+    }
     $("#product-description").textContent =
       "Hoodie oversize negra de 420 g/m², confeccionada en 100% algodón. Explora las vistas y elige talla y cantidad para solicitar tu pedido.";
     $("#footer-mode").textContent = "OFFCODE™ · Hecho para salir del código.";

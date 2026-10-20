@@ -17,12 +17,19 @@ export function buyerMessage(order, bank = {}) {
       const account = order.transferAccount ?? bank;
       if (![order.subtotalCents, order.shippingCents, order.totalCents].every(Number.isSafeInteger) ||
           !account.name || !account.beneficiary || !/^\d{18}$/.test(account.clabe)) return null;
+      const concept = typeof order.transferConcept === "string" && order.transferConcept ? [`Concepto: ${order.transferConcept}`] : [];
+      if (order.transferReport?.at) {
+        title = "Confirmar que la transferencia está en verificación";
+        lines.push(`Total del pedido: ${money(order.totalCents)}`, ...concept,
+          "Recibimos tu aviso de transferencia. Estamos verificando el depósito directamente en el banco; el aviso no confirma el pago. Te confirmaremos cuando el abono quede verificado. El pedido aún no ha sido enviado.");
+        break;
+      }
       title = "Compartir total y datos de transferencia";
       lines.push(...[
         ...(order.items ?? []).map((item) => `${item.name || "LA AFRO × OFFCODE"} · Talla ${item.size} × ${item.qty}`),
         `Prendas: ${money(order.subtotalCents)}`, `Envío: ${money(order.shippingCents)}`, `Total confirmado: ${money(order.totalCents)}`,
-        `Banco: ${account.name}`, `Beneficiario: ${account.beneficiary}`, `CLABE: ${account.clabe}`, `Referencia: ${order.id}`,
-        "Verifica los datos y usa la referencia del pedido al transferir. Confirmaremos el pago después de comprobar el abono en nuestra cuenta. El pedido aún no ha sido enviado.",
+        `Banco: ${account.name}`, `Beneficiario: ${account.beneficiary}`, `CLABE: ${account.clabe}`, `Referencia: ${order.id}`, ...concept,
+        "Transfiere exactamente el total y usa el concepto indicado. Confirmaremos el pago después de comprobar el abono en nuestra cuenta. El pedido aún no ha sido enviado.",
       ]);
       break;
     }
