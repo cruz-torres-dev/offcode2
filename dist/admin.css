@@ -546,6 +546,33 @@ summary {
   color: var(--ink);
   border-color: var(--paper);
 }
+.badge.reported {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.transfer-check {
+  margin: 18px 0;
+  padding: 16px 18px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+}
+.transfer-check.reported {
+  border-color: var(--warn);
+  border-left-width: 3px;
+}
+.transfer-check p {
+  margin: 4px 0;
+}
+.transfer-check-title {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+.transfer-check.reported .transfer-check-title {
+  color: var(--warn);
+}
 .check {
   color: var(--muted);
 }

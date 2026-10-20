@@ -71,6 +71,7 @@ async function load() {
   for (const [label, value] of [
     ["Por confirmar", overview.counts.requested],
     ["Pendientes de pago", overview.counts.awaiting_transfer],
+    ["Transferencias reportadas", overview.transferReported ?? 0],
     ["Por despachar", overview.counts.paid],
     ["Enviados", overview.counts.shipped],
   ]) {
@@ -336,6 +337,44 @@ function emailDetails(card, order) {
   details.append(refresh, results);
   card.append(details);
 }
+// Bank data and the buyer's notice come from the order snapshot, so the owner
+// checks the same account, total and concept the buyer was shown.
+function transferBlock(o) {
+  const reported = o.transferReport?.at;
+  const box = document.createElement("section");
+  box.className = reported ? "transfer-check reported" : "transfer-check";
+  box.append(
+    text(
+      "strong",
+      reported ? "TRANSFERENCIA REPORTADA — VERIFICAR EN BANCO" : "Esperando la transferencia del comprador",
+      "transfer-check-title",
+    ),
+  );
+  const account = o.transferAccount;
+  for (const [label, value] of [
+    ["Referencia", o.id],
+    ["Total a verificar", money(o.totalCents) + " MXN"],
+    ["Concepto", o.transferConcept || "Sin concepto registrado"],
+    [
+      "Cuenta",
+      account
+        ? `${account.name} · ${account.beneficiary} · CLABE ${account.clabe}`
+        : "Sin datos bancarios en este pedido",
+    ],
+    ...(reported ? [["Aviso del comprador", new Date(reported).toLocaleString("es-MX")]] : []),
+  ])
+    box.append(text("p", `${label}: ${value}`));
+  box.append(
+    text(
+      "p",
+      reported
+        ? "El aviso no confirma el pago. Marca el pago como verificado solo después de ver el abono en el banco."
+        : "El pago se verifica solo con el abono en el banco, aunque el comprador no avise.",
+      "fine",
+    ),
+  );
+  return box;
+}
 function render() {
   const filtered = loaded;
   $("#orders").replaceChildren();
@@ -360,6 +399,10 @@ function render() {
       text("h2", o.id),
       text("span", labels[o.status] || o.status, "badge"),
     );
+    if (o.status === "awaiting_transfer" && o.transferReport)
+      head.append(text("span", "Transferencia reportada", "badge reported"));
+    if (o.cancellation?.reason === "unpaid_transfer_expired")
+      head.append(text("span", "Reserva vencida · cancelación automática", "badge"));
     card.append(
       head,
       text("p", new Date(o.createdAt).toLocaleString("es-MX"), "fine"),
@@ -378,8 +421,13 @@ function render() {
       text("p", o.items.map((p) => `${p.name || "Producto OFFCODE"} · Talla ${p.size} × ${p.qty}`).join(" / ")),
       text("p", "Prendas: " + money(o.subtotalCents)),
       text("p", "Método de pago: " + (!o.paymentMethod || o.paymentMethod === "bank_transfer" ? "Transferencia bancaria" : "Método no reconocido: revisar")),
-      text("p", "Pago: " + (["paid", "shipped", "delivered"].includes(o.status) ? "Verificado manualmente" : o.status === "cancelled" ? "Pedido cancelado" : o.status === "requested" ? "Pendiente de confirmar disponibilidad" : "Pendiente de verificación bancaria")),
+      text("p", "Pago: " + (["paid", "shipped", "delivered"].includes(o.status) ? "Verificado manualmente" : o.status === "cancelled" ? "Pedido cancelado" : o.status === "requested" ? "Pendiente de confirmar disponibilidad" : o.transferReport ? "Transferencia reportada por el comprador · pendiente de verificar en el banco" : "Pendiente de verificación bancaria")),
     );
+    if (o.status === "awaiting_transfer") card.append(transferBlock(o));
+    if (o.reservationExpiresAt) card.append(text("p", "Vencimiento de reserva: " + new Date(o.reservationExpiresAt).toLocaleString("es-MX") +
+      (o.transferReport ? " · Protegida: transferencia reportada, revisar en el banco." : ""), "fine"));
+    if (o.cancellation?.reason === "unpaid_transfer_expired") card.append(text("p", "Motivo: unpaid_transfer_expired · Se liberó únicamente la reserva activa de este pedido." +
+      (o.cancellation.previousStatus ? " Estado previo: " + (labels[o.cancellation.previousStatus] || o.cancellation.previousStatus) + "." : ""), "fine"));
     if (o.shipping) card.append(text("p", "Servicio seleccionado: " + (o.shipping.description || "FedEx")));
     if (o.totalAcceptance) card.append(text("p", "Total aceptado por el comprador: " + money(o.totalAcceptance.totalCents), "fine"));
     card.append(
@@ -542,7 +590,9 @@ function render() {
           confirm(
             o.status === "paid"
               ? "Cancelar no devuelve dinero. ¿Ya acordaste por separado cómo gestionar la devolución y quieres cancelar?"
-              : "¿Cancelar esta solicitud?",
+              : o.transferReport
+                ? "El comprador avisó que ya transfirió. Revisa el banco antes de cancelar: cancelar no devuelve dinero. ¿Cancelar este pedido?"
+                : "¿Cancelar esta solicitud?",
           )
         )
           update(o, { status: "cancelled" }, cancel);
@@ -558,6 +608,7 @@ function render() {
           new Date(e.at).toLocaleString("es-MX") +
             " · " +
             labels[e.status] +
+            (e.event === "transfer_reported" ? " · Aviso de transferencia del comprador" : "") +
             (e.note ? " · " + e.note : ""),
           "fine",
         ),
@@ -687,6 +738,7 @@ async function loadSummary() {
   grid.replaceChildren(
     statCard("Pedidos pendientes", data.orders.pending, "Solicitudes recibidas sin confirmar."),
     statCard("Pagos por verificar", data.orders.awaitingPayment, "Transferencias sin comprobar en el banco."),
+    statCard("Transferencias reportadas", data.orders.transferReported, "Avisos del comprador por revisar en el banco. El aviso no confirma el pago."),
     statCard("Variantes con stock bajo", data.inventory.lowStockVariants, `${data.inventory.lowStockUnits} unidades disponibles en esas variantes.`),
     statCard("Pedidos por preparar", data.orders.toPrepare, "Pago verificado, sin entregar a FedEx."),
     statCard("Envíos pendientes", data.orders.pendingShipments, "En tránsito sin entrega confirmada."),
