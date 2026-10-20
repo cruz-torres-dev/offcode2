@@ -1232,6 +1232,11 @@ export async function createApp(options = {}) {
                 order.labelJob?.result?.tracking ??
                 clean(change.tracking, 4, 100, "el número de rastreo");
             }
+            if (change.status === "delivered" && change.deliveryConfirmed !== true)
+              throw httpError(
+                400,
+                "Confirma la entrega con la paquetería o el cliente antes de marcar entregado.",
+              );
             order.status = change.status;
             order.updatedAt = new Date().toISOString();
             order.history.push({ at: order.updatedAt, status: order.status });

@@ -229,6 +229,7 @@ test("Transferencia manual: solicitud, confirmación, pago, envío y persistenci
     const delivered = await app.call(route, "PATCH", {
       version: 4,
       status: "delivered",
+      deliveryConfirmed: true,
     });
     assert.equal(delivered.status, 200);
     assert.equal(delivered.data.order.history.length, 5);

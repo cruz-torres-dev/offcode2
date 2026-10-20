@@ -520,10 +520,11 @@ function render() {
     }
     if (o.status === "shipped") {
       const delivered = fieldCheck(
-        "Confirmé la entrega con la paquetería o el cliente.",
+        "Declaro que confirmé la entrega con la paquetería o el cliente.",
       );
       formAction(card, o, "Marcar entregado", [delivered], () => ({
         status: "delivered",
+        deliveryConfirmed: delivered.input.checked,
       }));
     }
     if (

@@ -148,7 +148,7 @@ test("Pedido único: propietario y comprador; transiciones confirmadas; API priv
       { status: "awaiting_transfer", stockConfirmed: true, shippingCents: 10000 },
       { status: "paid", paymentVerified: true },
       { status: "shipped", handedToCarrier: true, carrier: "FedEx", tracking: "SYNTHETIC-TRACKING-123" },
-      { status: "delivered" },
+      { status: "delivered", deliveryConfirmed: true },
     ]) {
       assert.equal((await app.call(route, "PATCH", { version, ...change })).status, 200);
       assert.equal((await app.call(route, "PATCH", { version, ...change })).status, 409);
