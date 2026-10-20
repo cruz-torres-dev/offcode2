@@ -91,7 +91,7 @@ function accountLinkMessage({ from, to, title, action, url, notice }) {
 const cookieValue = (req, name) => req.headers.cookie?.split(";").map((s) => s.trim()).find((s) => s.startsWith(name + "="))?.slice(name.length + 1) ?? "";
 
 export function createCustomerAccounts({ db, origin, production, body, send, limit, validateCustomer,
-  env = process.env, fetcher, now = Date.now, logger = console.info } = {}) {
+  env = process.env, fetcher, now = Date.now, logger = console.info, beforeOrders = async () => {} } = {}) {
   const mail = createEmailTransport({ env, fetcher });
   const pending = new Set();
   const cookieName = production ? "__Host-offcode_customer" : "offcode_customer";
@@ -191,12 +191,17 @@ export function createCustomerAccounts({ db, origin, production, body, send, lim
   function customerOrder(order, detail = false) {
     const [payment, shipping] = ORDER_STATE[order.status] ?? ["unknown", "unknown"];
     const carrier = text(order.carrier), tracking = text(order.tracking);
+    // A buyer's notice is shown as such; only the owner's verification makes it paid.
+    const reported = order.status === "awaiting_transfer" && typeof order.transferReport?.at === "string";
     const result = {
       id: order.id,
       createdAt: order.createdAt,
       status: order.status,
-      statusLabel: ORDER_LABELS[order.status] ?? order.status,
-      payment: { status: payment, label: PAYMENT_LABELS[payment] },
+      statusLabel: order.cancellation?.reason === "unpaid_transfer_expired" ? "Vencido · cancelado" : ORDER_LABELS[order.status] ?? order.status,
+      reservationExpiresAt: order.reservationExpiresAt ?? null,
+      cancellationReason: order.cancellation?.reason === "unpaid_transfer_expired" ? "unpaid_transfer_expired" : null,
+      payment: { status: payment, label: reported ? "Transferencia reportada · en verificación" : PAYMENT_LABELS[payment] },
+      transferReport: typeof order.transferReport?.at === "string" ? { at: order.transferReport.at } : null,
       shipping: {
         status: shipping,
         label: SHIPPING_LABELS[shipping],
@@ -232,7 +237,8 @@ export function createCustomerAccounts({ db, origin, production, body, send, lim
       // Only real recorded transitions; internal owner notes stay private.
       result.history = (Array.isArray(order.history) ? order.history : [])
         .filter((entry) => entry && typeof entry.status === "string")
-        .map((entry) => ({ at: entry.at, status: entry.status, label: ORDER_LABELS[entry.status] ?? entry.status }));
+        .map((entry) => ({ at: entry.at, status: entry.status,
+          label: entry.event === "reservation_expired" ? "Reserva vencida · cancelación automática" : entry.event === "transfer_reported" ? "Aviso de transferencia enviado · pendiente de verificar" : ORDER_LABELS[entry.status] ?? entry.status }));
     }
     return result;
   }
@@ -336,6 +342,7 @@ export function createCustomerAccounts({ db, origin, production, body, send, lim
     // ---- Orders ----------------------------------------------------------
     if (route === "/api/customer/orders" && method === "GET") {
       const user = await requireUser(req);
+      await beforeOrders();
       const rows = await db.all("SELECT o.id,o.payload FROM orders o JOIN customer_orders c ON c.order_id=o.id WHERE c.customer_id=? ORDER BY o.created_at DESC LIMIT 100", [user.id]);
       send(res, 200, {
         orders: rows.map((r) => customerOrder(JSON.parse(r.payload))),
@@ -348,7 +355,9 @@ export function createCustomerAccounts({ db, origin, production, body, send, lim
       // reveal whether somebody else's order exists.
       const row = await db.get("SELECT o.payload FROM orders o JOIN customer_orders c ON c.order_id=o.id WHERE o.id=? AND c.customer_id=?", [orderMatch[1], user.id]);
       if (!row) throw fail(404, "Pedido no encontrado.");
-      send(res, 200, { order: customerOrder(JSON.parse(row.payload), true) }); return true;
+      await beforeOrders(orderMatch[1]);
+      const fresh = await db.get("SELECT payload FROM orders WHERE id=?", [orderMatch[1]]);
+      send(res, 200, { order: customerOrder(JSON.parse(fresh.payload), true) }); return true;
     }
 
     // ---- Addresses -------------------------------------------------------

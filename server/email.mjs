@@ -106,5 +106,93 @@ export function renderEmailV2(data) {
 export function renderOrderEmail(data) {
   if (data?.template === 1) return renderEmailV1(data);
   if (data?.template === 2) return renderEmailV2(data);
+  if (data?.template === 3) return renderEmailV3(data);
+  if (data?.template === 4) return renderEmailV4(data);
   throw Error("unsupported_email_template");
+}
+
+// Deterministic on purpose (no Intl): a queued retry must rebuild the same body.
+const mxn = (cents) => "$" + String(Math.trunc(cents / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ",") +
+  "." + String(cents % 100).padStart(2, "0") + " MXN";
+function supportActions(data) {
+  try {
+    const url = new URL(data.supportUrl);
+    if (url.protocol === "https:" && !url.username && !url.password)
+      return [{ label: "Contactar a OFFCODE sobre este pedido", url: url.href }];
+  } catch {}
+  return [];
+}
+function composeEmail(data, title, lines, actions = []) {
+  const buttons = actions.map(({ label, url }) => `<p style="margin:24px 0"><a href="${escapeHtml(url)}" style="display:inline-block;padding:14px 20px;background:#f5f5f5;color:#080808;font-size:14px;text-decoration:none">${escapeHtml(label)} ↗</a></p><p style="font-size:12px;line-height:1.7;overflow-wrap:anywhere;color:#a6a6a6">${escapeHtml(url)}</p>`).join("");
+  return {
+    from: data.from, to: [data.to], subject: `OFFCODE · ${title} · ${data.orderId}`,
+    text: `OFFCODE\n${title}\n\n${lines.join("\n\n")}\n\nNotificación transaccional de tu pedido.` +
+      (actions.length ? "\n\n" + actions.map(({ label, url }) => `${label}: ${url}`).join("\n\n") : ""),
+    html: `<!doctype html><html lang="es"><head><meta charset="utf-8"></head><body style="margin:0;background:#080808;color:#f5f5f5;font-family:Arial,Helvetica,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px"><table role="presentation" width="100%" style="max-width:600px;background:#181818;border:1px solid #303030" cellpadding="28"><tr><td><p style="letter-spacing:3px;font-size:13px;color:#a6a6a6">OFFCODE</p><h1 style="font-size:28px;font-weight:400">${escapeHtml(title)}</h1>${lines.map((line) => `<p style="font-size:15px;line-height:1.7;color:#e0e0e0">${escapeHtml(line)}</p>`).join("")}${buttons}<p style="border-top:1px solid #454545;padding-top:20px;color:#a6a6a6;font-size:12px">Notificación transaccional de tu pedido.</p></td></tr></table></td></tr></table></body></html>`,
+  };
+}
+
+// V3 adds the transfer details to the buyer's instructions, an owner alert for
+// orders created already awaiting the transfer, and the owner alert for a
+// buyer's transfer notice. Every other event renders exactly like V2.
+export function renderEmailV3(data) {
+  const concept = typeof data.concept === "string" && data.concept ? [`Concepto esperado: ${data.concept}`] : [];
+  if (data.event === "transfer_reported") {
+    if (data.audience !== "owner") throw Error("unsupported_email_event");
+    return composeEmail(data, "Transferencia reportada: verifica en tu banco", [
+      `Referencia: ${data.orderId}`,
+      `Total esperado: ${mxn(data.totalCents)}`,
+      ...concept,
+      ...(typeof data.reportedAt === "string" ? [`Aviso registrado: ${data.reportedAt.slice(0, 16).replace("T", " ")} UTC`] : []),
+      "El comprador indicó en la tienda que ya realizó la transferencia. Este aviso no confirma el pago.",
+      "Verifica el depósito directamente en tu banca por el total y el concepto exactos. Marca el pago como verificado en tu panel privado solo después de comprobar el abono.",
+    ]);
+  }
+  if (data.event === "awaiting_transfer" && data.audience === "owner")
+    return composeEmail(data, "Nuevo pedido pendiente de transferencia", [
+      `Referencia: ${data.orderId}`,
+      `LA AFRO × OFFCODE · ${data.items.map((i) => `${i.qty} × talla ${i.size}`).join(" / ")}`,
+      `Total aceptado por el comprador: ${mxn(data.totalCents)}`,
+      ...concept,
+      "El inventario quedó reservado y el comprador recibió los datos de transferencia de la cuenta configurada.",
+      "Este aviso no confirma el pago. Verifica el abono en tu banco antes de marcarlo como pagado en tu panel privado.",
+    ]);
+  if (data.event === "awaiting_transfer" && data.audience === "buyer" && data.transfer)
+    return composeEmail(data, "Realiza tu transferencia bancaria", [
+      `Referencia del pedido: ${data.orderId}`,
+      `Total exacto a transferir: ${mxn(data.totalCents)}`,
+      `Titular: ${data.transfer.beneficiary}`,
+      `Banco: ${data.transfer.bank}`,
+      `CLABE: ${data.transfer.clabe}`,
+      `Concepto: ${data.transfer.concept}`,
+      "Transfiere exactamente el total y escribe el concepto tal como aparece para que podamos identificar tu pago.",
+      "Cuando hayas transferido, avísanos con el botón «Ya realicé la transferencia» en la página de tu pedido o por el canal de atención de OFFCODE. El aviso no confirma el pago.",
+      "El pago se confirmará únicamente después de verificar el depósito en el banco. Tu pedido todavía no ha sido preparado ni enviado.",
+    ], supportActions(data));
+  return renderEmailV2(data);
+}
+
+// Prior renderers and pending jobs are immutable. V4 alone adds scoped recovery
+// and distinguishes expiry from a manual cancellation, with the same job keys.
+export function renderEmailV4(data) {
+  const actions = [];
+  if (data.audience === "buyer" && typeof data.recoveryUrl === "string") {
+    const url = new URL(data.recoveryUrl);
+    if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password &&
+        url.pathname === "/checkout.html" && url.searchParams.get("pedido") === data.orderId && /^#access=[A-Za-z0-9_-]{43}$/.test(url.hash))
+      actions.push({ label: "Consultar mi pedido", url: url.href });
+  }
+  if (data.event === "cancelled" && data.cancellationReason === "unpaid_transfer_expired")
+    return composeEmail(data, "Tu solicitud venció", [
+      `Referencia: ${data.orderId}`,
+      "La reserva venció sin aviso de transferencia ni pago verificado. La solicitud fue cancelada y sus prendas dejaron de estar reservadas.",
+      "Inicia una nueva solicitud para volver a consultar disponibilidad. No transfieras a este pedido; si ya lo hiciste, contacta a OFFCODE con tu referencia.",
+      "Este aviso no confirma ni realiza un reembolso.",
+    ], [...actions, ...supportActions(data)]);
+  const message = renderEmailV3(data);
+  if (!actions.length) return message;
+  const notice = "Guarda este correo para regresar al mismo pedido desde otro navegador. El enlace es privado, tiene caducidad y no confirma ningún pago.";
+  const buttons = actions.map(({ label, url }) => `<p style="margin:24px 0"><a href="${escapeHtml(url)}" style="display:inline-block;padding:14px 20px;background:#f5f5f5;color:#080808;text-decoration:none">${label} ↗</a></p>`).join("");
+  return { ...message, text: message.text + "\n\n" + actions.map(({ label, url }) => `${label}: ${url}`).join("\n") + "\n\n" + notice,
+    html: message.html.replace('<p style="border-top:', buttons + `<p style="font-size:13px;line-height:1.7;color:#c7c7c7">${notice}</p><p style="border-top:`) };
 }

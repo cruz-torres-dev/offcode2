@@ -17,6 +17,9 @@ import { createEmailOutbox } from "./email-outbox.mjs";
 import { migrate, readSchemaVersion } from "./db.mjs";
 import { openDatabase } from "./database.mjs";
 import { createCatalogStore } from "./catalog-store.mjs";
+import { bankSnapshot, transferConcept, transferInstructions } from "./bank-transfer.mjs";
+import { createOrderAccess, orderDurations } from "./order-access.mjs";
+import { createOrderExpiration, EXPIRATION_REASON } from "./order-expiration.mjs";
 import {
   initialSettings,
   normalizeSettings,
@@ -100,6 +103,8 @@ async function body(req) {
 }
 
 export async function createApp(options = {}) {
+  const orderClock = options.orderLifecycle?.now ?? Date.now;
+  const durations = orderDurations({ env: options.env ?? process.env, ...options.orderLifecycle });
   const trustRenderProxy =
     options.trustRenderProxy ?? process.env.TRUST_RENDER_PROXY === "true";
   const production =
@@ -199,6 +204,8 @@ export async function createApp(options = {}) {
   // A process interrupted during a purchase cannot know whether Envia charged it.
   await db.run("UPDATE shipping_jobs SET state='uncertain' WHERE state='pending'");
   const catalog = createCatalogStore(db);
+  const orderAccess = createOrderAccess({ db, origin, production, now: orderClock, ttlMs: durations.accessMs,
+    settingsKey: options.settingsKey ?? process.env.SETTINGS_ENCRYPTION_KEY ?? "", password });
   const email = await createEmailOutbox({
     ...options.email,
     contactUrl: new URL("/contacto.html", origin).href,
@@ -206,9 +213,16 @@ export async function createApp(options = {}) {
     outboxDirectory:
       options.email?.outboxDirectory ??
       process.env.EMAIL_OUTBOX_DIR,
-    listOrders: async () =>
-      (await db.all("SELECT payload FROM orders")).map((row) => JSON.parse(row.payload)),
+    recoveryUrl: orderAccess.recoveryUrl,
+    listOrders: async () => (await db.all(`SELECT o.payload,a.expires,a.nonce,a.tag,a.sealed,a.origin
+      FROM orders o LEFT JOIN order_access a ON a.order_id=o.id`)).map((row) => {
+      const order = JSON.parse(row.payload);
+      return { ...order, orderRecovery: row.expires === null ? null : orderAccess.envelope(row) };
+    }),
   });
+  async function captureEmail(order) {
+    email.capture({ ...order, orderRecovery: await orderAccess.delivery(order.id) });
+  }
   const expireQuotes = () =>
     db.run("DELETE FROM shipping_quotes WHERE expires<?", [Date.now()]);
   await expireQuotes();
@@ -258,6 +272,87 @@ export async function createApp(options = {}) {
     const row = await db.get("SELECT * FROM orders WHERE id=?", [id]);
     if (!row) throw httpError(404, "Pedido no encontrado.");
     return summary(row);
+  };
+  // Transitional verifier for historical tab-only credentials. New orders
+  // always receive a server-random credential stored as a digest and envelope.
+  const orderAccessToken = (id, requestKey) =>
+    createHash("sha256")
+      .update(`offcode-order-access-v1\n${id}\n${requestKey}`)
+      .digest("base64url");
+  const createdOrder = async (order) => {
+    const credential = await orderAccess.forCreation(order.id);
+    return {
+      id: order.id,
+      subtotalCents: order.subtotalCents,
+      shippingCents: order.shippingCents,
+      totalCents: order.totalCents,
+      status: order.status,
+      statusLabel: order.cancellation?.reason === EXPIRATION_REASON ? "Vencido · cancelado" : labels[order.status] ?? order.status,
+      cancellationReason: order.cancellation?.reason === EXPIRATION_REASON ? EXPIRATION_REASON : null,
+      paymentMethod: order.paymentMethod ?? "bank_transfer",
+      accessToken: credential.token,
+      accessExpiresAt: new Date(credential.expires).toISOString(),
+      reservationExpiresAt: order.reservationExpiresAt ?? null,
+      transfer: transferInstructions(order),
+    };
+  };
+  // What the buyer may see about their own order: no address, phone, internal
+  // notes or history, and bank details only while a transfer is still due.
+  const buyerOrder = (order) => ({
+    id: order.id,
+    createdAt: order.createdAt,
+    status: order.status,
+    statusLabel: order.cancellation?.reason === EXPIRATION_REASON ? "Vencido · cancelado" : labels[order.status] ?? order.status,
+    reservationExpiresAt: order.reservationExpiresAt ?? null,
+    cancellationReason: order.cancellation?.reason === EXPIRATION_REASON ? EXPIRATION_REASON : null,
+    items: (Array.isArray(order.items) ? order.items : []).map(({ name, color, size, qty, unitCents }) => ({ name, color, size, qty, unitCents })),
+    subtotalCents: order.subtotalCents,
+    shippingCents: order.shippingCents,
+    totalCents: order.totalCents,
+    currency: "MXN",
+    shippingService: order.shipping?.description ?? "",
+    transfer: transferInstructions(order),
+    transferReport: order.transferReport ? { at: order.transferReport.at } : null,
+  });
+  const orderAccessDenied = "No encontramos ese pedido con este acceso. Usa el enlace de tu correo o tu cuenta verificada.";
+  // A guessed reference alone never reveals or changes an order: the caller
+  // needs the creating tab's token or the verified account linked to it.
+  async function buyerAccess(req, id, token) {
+    const explicit = token !== undefined && token !== null && token !== "";
+    token = explicit ? token : orderAccess.cookieToken(req);
+    if (token) {
+      if (typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token))
+        throw httpError(404, orderAccessDenied);
+      const row = await db.get("SELECT * FROM orders WHERE id=?", [id]);
+      const credential = await db.get("SELECT * FROM order_access WHERE order_id=?", [id]);
+      if (row && orderAccess.valid(credential, token))
+        return { order: await summary(row), channel: "order_link", credential, token };
+      // Upgrade the old tab-only credential once, within a bounded lifetime.
+      // Historical inventory is untouched; the replacement is server-random.
+      if (row && !credential && Date.parse(JSON.parse(row.payload).createdAt) + durations.accessMs > orderClock() &&
+          timingSafeEqual(Buffer.from(orderAccessToken(id, row.request_key)), Buffer.from(token))) {
+        const upgraded = await db.tx(async (exec) => orderAccess.ensure(id, exec, Date.parse(JSON.parse(row.payload).createdAt) + durations.accessMs));
+        return { order: await summary(row), channel: "order_link", credential: upgraded,
+          token: orderAccess.open(id, orderAccess.envelope(upgraded)), upgraded: true };
+      }
+      if (explicit) throw httpError(404, orderAccessDenied);
+    }
+    const shopper = await accounts.current(req);
+    if (!shopper?.verified_at)
+      throw httpError(401, "Usa el enlace seguro de tu correo o inicia sesión en tu cuenta verificada.");
+    const row = await db.get(
+      "SELECT o.* FROM orders o JOIN customer_orders c ON c.order_id=o.id WHERE o.id=? AND c.customer_id=?",
+      [id, shopper.id],
+    );
+    if (!row) throw httpError(404, orderAccessDenied);
+    return { order: await summary(row), channel: "customer_account" };
+  }
+  const reportBlocked = {
+    requested: "Este pedido todavía no tiene datos de transferencia. Espera la confirmación de OFFCODE antes de transferir.",
+    paid: "El pago de este pedido ya fue verificado.",
+    shipped: "El pago de este pedido ya fue verificado.",
+    delivered: "El pago de este pedido ya fue verificado.",
+    cancelled: "Este pedido fue cancelado. No transfieras; si ya lo hiciste, contacta a OFFCODE con tu referencia.",
   };
   const fingerprint = (customer, items) =>
     createHash("sha256")
@@ -359,9 +454,13 @@ export async function createApp(options = {}) {
     }
     return token;
   };
+  const expiration = createOrderExpiration({ db, catalog, persistOrder, onExpired: captureEmail, now: orderClock,
+    autoStart: options.orderLifecycle?.autoStart ?? true, logger: options.orderLifecycle?.logger ?? console.info });
   const accounts = createCustomerAccounts({ db, origin, production, body, send, limit, validateCustomer,
     ...options.customers,
+    beforeOrders: (id) => id ? expiration.expireOne(id) : expiration.sweep(),
   });
+  await expiration.start();
   const server = http.createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -383,6 +482,7 @@ export async function createApp(options = {}) {
         if (req.method !== "GET" && req.headers.origin !== origin)
           throw httpError(403, "Origen no autorizado.");
         const ip = clientIp(req, trustRenderProxy);
+        if (["/api/config", "/api/shipping/rates"].includes(route)) expiration.kick();
         if (await accounts.handle(req, res, url, ip)) return;
         if (route === "/api/config" && req.method === "GET") {
           const product = await catalog.productPayload();
@@ -522,14 +622,8 @@ export async function createApp(options = {}) {
                 "Ya existe una solicitud con esta referencia y otros datos. Contacta a OFFCODE para corregirla antes de enviar otra.",
               );
             if (saved.shipping) requireAcceptedTotal(data, saved.totalCents);
-            return send(res, 200, {
-              id: saved.id,
-              subtotalCents: saved.subtotalCents,
-              shippingCents: saved.shippingCents,
-              totalCents: saved.totalCents,
-              status: saved.status,
-              paymentMethod: saved.paymentMethod ?? "bank_transfer",
-            });
+            await expiration.expireOne(saved.id);
+            return send(res, 200, await createdOrder(await getOrder(saved.id)));
           }
           if (!shipping.enabled && (data.shippingQuoteId || data.totalAccepted !== undefined || data.acceptedTotalCents !== undefined))
             throw httpError(409, "La cotización de envíos ya no está habilitada. Consulta con OFFCODE antes de continuar.");
@@ -540,6 +634,14 @@ export async function createApp(options = {}) {
             throw httpError(400, "Selecciona transferencia bancaria antes de enviar tu solicitud.");
           if (quote) requireAcceptedTotal(data,
             items.reduce((sum, item) => sum + item.qty * item.unitCents, 0) + quote.rate.shippingCents);
+          // A quoted order shows the transfer details as soon as it is saved,
+          // so it cannot be created without a complete receiving account.
+          const account = quote ? bankSnapshot(bank) : null;
+          if (quote && !account)
+            throw httpError(
+              503,
+              "No podemos recibir pedidos por transferencia en este momento: falta configurar la cuenta bancaria de OFFCODE. No se guardó tu pedido ni se reservó inventario.",
+            );
           limit(
             "customer:" +
               createHash("sha256")
@@ -549,12 +651,13 @@ export async function createApp(options = {}) {
             3600e3,
           );
           const id = "OF-" + randomBytes(6).toString("hex").toUpperCase(),
-            now = new Date().toISOString(),
+            now = new Date(orderClock()).toISOString(),
             subtotalCents = items.reduce((s, p) => s + p.qty * p.unitCents, 0);
           const order = {
             id,
             createdAt: now,
             updatedAt: now,
+            reservationExpiresAt: new Date(orderClock() + durations.reservationMs).toISOString(),
             customer,
             // Snapshot: product name, SKU, size, color, unit price and quantity
             // are frozen here, so editing or archiving a product never rewrites
@@ -577,13 +680,20 @@ export async function createApp(options = {}) {
                   quotedAt: now,
                 }
               : null,
-            status: "requested",
+            // Stock is reserved atomically below, so a quoted order with an
+            // accepted total goes straight to awaiting the transfer.
+            status: quote ? "awaiting_transfer" : "requested",
             carrier: "",
             tracking: "",
-            history: [{ at: now, status: "requested" }],
+            history: [
+              quote
+                ? { at: now, status: "awaiting_transfer", note: "Pedido creado con total aceptado e inventario reservado. Se mostraron los datos de transferencia; el pago sigue pendiente de verificar en el banco." }
+                : { at: now, status: "requested" },
+            ],
             consent: { at: now, privacyUrl, termsUrl },
             ...(quote ? { totalAcceptance: { at: now, quoteId: data.shippingQuoteId,
-              totalCents: subtotalCents + quote.rate.shippingCents, currency: "MXN" } } : {}),
+              totalCents: subtotalCents + quote.rate.shippingCents, currency: "MXN" },
+              transferAccount: account, transferConcept: transferConcept(id) } : {}),
           };
           const shopper = await accounts.current(req);
           // Order row and stock reservation commit together or not at all.
@@ -612,24 +722,68 @@ export async function createApp(options = {}) {
               [id, data.requestKey, now, JSON.stringify(order)],
             );
             await catalog.reserve(id, items, exec);
+            await orderAccess.ensure(id, exec);
             if (shopper?.verified_at && customer.email.trim().toLowerCase() === shopper.email)
               await exec.run("INSERT INTO customer_orders(order_id,customer_id) VALUES(?,?)", [id, shopper.id]);
           });
-          if (duplicate) return send(res, 200, { id: duplicate.id, subtotalCents: duplicate.subtotalCents,
-            shippingCents: duplicate.shippingCents, totalCents: duplicate.totalCents, status: duplicate.status,
-            paymentMethod: duplicate.paymentMethod ?? "bank_transfer" });
-          email.capture(order);
-          return send(res, 201, {
-            id,
-            subtotalCents: order.subtotalCents,
-            shippingCents: order.shippingCents,
-            totalCents: order.totalCents,
-            status: order.status,
-            paymentMethod: order.paymentMethod,
+          if (duplicate) return send(res, 200, await createdOrder(duplicate));
+          await captureEmail(order);
+          return send(res, 201, await createdOrder(order));
+        }
+        const buyerMatch = route.match(/^\/api\/orders\/(OF-[A-F0-9]{12})\/(access|transfer|transfer-report)$/);
+        if (buyerMatch && req.method === "POST") {
+          limit("order-access:" + ip, 120, 15 * 60e3);
+          const data = await body(req);
+          const access = await buyerAccess(req, buyerMatch[1], data.accessToken);
+          if (access.credential && (buyerMatch[2] === "access" || access.upgraded))
+            orderAccess.setCookie(res, access.order.id, access.token, access.credential.expires);
+          await expiration.expireOne(access.order.id);
+          if (["transfer", "access"].includes(buyerMatch[2]))
+            return send(res, 200, { order: buyerOrder(await getOrder(access.order.id)),
+              ...(access.upgraded ? { accessToken: access.token } : {}) });
+          if (data.confirmed !== true)
+            throw httpError(400, "Confirma que ya realizaste la transferencia antes de avisarnos.");
+          // Serialized with every other order write: concurrent or repeated
+          // notices leave exactly one report and never touch stock or totals.
+          const result = await catalog.tx(async (exec) => {
+            const row = await exec.get("SELECT * FROM orders WHERE id=?", [access.order.id]);
+            const current = { ...JSON.parse(row.payload), version: row.version };
+            if (access.credential && access.credential.expires <= orderClock()) throw orderAccess.denied();
+            const expired = await expiration.expireCurrent(current, exec);
+            if (expired) return { order: expired, expired: true };
+            if (current.transferReport && current.status === "awaiting_transfer") return { order: current, repeated: true };
+            if (!transferInstructions(current)) return { order: current, blocked: true };
+            const at = new Date(orderClock()).toISOString();
+            current.transferReport = { at, channel: access.channel };
+            current.history.push({
+              at,
+              status: current.status,
+              event: "transfer_reported",
+              note: "El comprador avisó que realizó la transferencia. Pendiente de verificar el depósito en el banco; el aviso no confirma el pago.",
+            });
+            return { order: await persistOrder(current, exec), repeated: false };
+          });
+          if (result.expired) await captureEmail(result.order);
+          if (result.expired || result.blocked) return send(res, 409, {
+            error: result.order.cancellation?.reason === EXPIRATION_REASON
+              ? "La reserva venció y el pedido fue cancelado. Inicia una nueva solicitud; si ya transferiste, contacta a OFFCODE."
+              : reportBlocked[result.order.status] ?? "Este pedido no admite un aviso de transferencia en su estado actual.",
+            order: buyerOrder(result.order),
+          });
+          if (!result.repeated) await captureEmail(result.order);
+          return send(res, result.repeated ? 200 : 201, {
+            reported: true,
+            alreadyReported: result.repeated,
+            message: result.repeated
+              ? "Ya recibimos tu aviso de transferencia. Estamos verificando el depósito."
+              : "Recibimos tu aviso. Revisaremos el depósito directamente en el banco. Este aviso no confirma que el pago haya sido recibido.",
+            order: buyerOrder(result.order),
+            ...(access.upgraded ? { accessToken: access.token } : {}),
           });
         }
         if (route.startsWith("/api/admin/")) {
           auth(req);
+          if (["/api/admin/orders", "/api/admin/overview", "/api/admin/summary"].includes(route)) await expiration.sweep();
           if (route === "/api/admin/email-notifications" && req.method === "GET") {
             const orderId = new URL(req.url, origin).searchParams.get("orderId");
             await getOrder(orderId);
@@ -855,7 +1009,8 @@ export async function createApp(options = {}) {
             );
             let total = 0,
               paidCount = 0,
-              paidTotalCents = 0;
+              paidTotalCents = 0,
+              transferReported = 0;
             for (const row of rows) {
               let value;
               try {
@@ -865,6 +1020,7 @@ export async function createApp(options = {}) {
               }
               total++;
               if (Object.hasOwn(counts, value.status)) counts[value.status]++;
+              if (value.status === "awaiting_transfer" && value.transferReport) transferReported++;
               if (["paid", "shipped", "delivered"].includes(value.status)) {
                 paidCount++;
                 paidTotalCents += Number(value.totalCents) || 0;
@@ -875,6 +1031,7 @@ export async function createApp(options = {}) {
               total,
               paidCount,
               paidTotalCents,
+              transferReported,
               enabled,
             });
           }
@@ -987,11 +1144,14 @@ export async function createApp(options = {}) {
               .trim()
               .slice(0, 150)
               .toLowerCase();
-            const status = url.searchParams.get("status") ?? "";
+            const filter = url.searchParams.get("status") ?? "";
+            // Pseudo-filter: awaiting transfer with a buyer notice to check in the bank.
+            const reportedOnly = filter === "transfer_reported";
+            const status = reportedOnly ? "awaiting_transfer" : filter;
             if (status && !Object.hasOwn(labels, status))
               throw httpError(400, "Revisa el estado del filtro.");
-            const condition = "(?='' OR json_extract(payload,'$.status')=?) AND (?='' OR instr(lower(id || ' ' || json_extract(payload,'$.customer.name')),?)>0)";
-            const params = [status, status, query, query];
+            const condition = "(?='' OR json_extract(payload,'$.status')=?) AND (?=0 OR json_extract(payload,'$.transferReport.at') IS NOT NULL) AND (?='' OR instr(lower(id || ' ' || json_extract(payload,'$.customer.name')),?)>0)";
+            const params = [status, status, reportedOnly ? 1 : 0, query, query];
             const total = (await db.get("SELECT COUNT(*) AS n FROM orders WHERE " + condition, params)).n;
             const rows = await db.all("SELECT * FROM orders WHERE " + condition + " ORDER BY created_at DESC, id DESC LIMIT 51 OFFSET ?", [...params, page * 50]);
             return send(res, 200, {
@@ -1164,6 +1324,7 @@ export async function createApp(options = {}) {
             /^\/api\/admin\/orders\/(OF-[A-F0-9]{12})$/,
           );
           if (match && req.method === "PATCH") {
+            await expiration.expireOne(match[1]);
             const change = await body(req),
               order = await getOrder(match[1]);
             if (change.version !== order.version)
@@ -1230,18 +1391,16 @@ export async function createApp(options = {}) {
                 change.shippingCents > 1000000
               )
                 throw httpError(400, "Indica el costo de envío en centavos.");
-              if (
-                !bank.name ||
-                !bank.beneficiary ||
-                !/^\d{18}$/.test(bank.clabe)
-              )
+              const account = bankSnapshot(bank);
+              if (!account)
                 throw httpError(
                   400,
                   "Falta configurar la cuenta de transferencia.",
                 );
               order.shippingCents = change.shippingCents;
               order.totalCents = order.subtotalCents + order.shippingCents;
-              order.transferAccount = { ...bank };
+              order.transferAccount = account;
+              order.transferConcept = transferConcept(order.id);
             }
             if (change.status === "paid" && change.paymentVerified !== true)
               throw httpError(400, "Verifica el abono en la cuenta bancaria.");
@@ -1278,6 +1437,7 @@ export async function createApp(options = {}) {
               );
             order.status = change.status;
             order.updatedAt = new Date().toISOString();
+            if (change.status === "cancelled") order.cancellation = { reason: "owner_cancelled", at: order.updatedAt };
             order.history.push({ at: order.updatedAt, status: order.status });
             // Stock and order status move together: a failed write never leaves
             // the inventory discounted without the matching status.
@@ -1286,7 +1446,7 @@ export async function createApp(options = {}) {
               if (change.status === "cancelled") await catalog.release(order.id, exec);
               return persistOrder(order, exec);
             });
-            email.capture(value);
+            await captureEmail(value);
             return send(res, 200, { order: await getOrder(order.id) });
           }
         }
@@ -1388,8 +1548,10 @@ export async function createApp(options = {}) {
     server,
     email,
     accounts,
+    expiration,
     db,
     close: async () => {
+      await expiration.close();
       await accounts.close();
       await email.close();
       return new Promise((resolve) => {

@@ -351,7 +351,7 @@ export function createCatalogStore(
   }
 
   // Cancellation releases only units still reserved; sold units stay sold.
-  async function release(orderId, exec = db) {
+  async function release(orderId, exec = db, { reason = "", actor = "owner" } = {}) {
     for (const row of await pendingReservations(orderId, "reserved", exec)) {
       await exec.run(
         `UPDATE inventory SET reserved = MAX(0, reserved - ?), updated_at=? WHERE variant_id=?`,
@@ -361,7 +361,7 @@ export function createCatalogStore(
         "UPDATE order_reservations SET state='released', updated_at=? WHERE order_id=? AND variant_id=?",
         [now(), orderId, row.variant_id],
       );
-      await movement(row.variant_id, "release", { reservedDelta: -row.qty, orderId }, exec);
+      await movement(row.variant_id, "release", { reservedDelta: -row.qty, orderId, reason, actor }, exec);
     }
   }
 
@@ -489,6 +489,7 @@ export function createCatalogStore(
       orders: {
         pending: count("requested"),
         awaitingPayment: count("awaiting_transfer"),
+        transferReported: orders.filter((o) => o.status === "awaiting_transfer" && o.transferReport).length,
         toPrepare: count("paid"),
         pendingShipments: count("shipped"),
       },

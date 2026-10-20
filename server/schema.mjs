@@ -1,6 +1,6 @@
 // SQLite schema; existing tables are preserved by idempotent migrations.
-export const SCHEMA_VERSION = 3;
-export const SCHEMA_NAME = "customer_account";
+export const SCHEMA_VERSION = 4;
+export const SCHEMA_NAME = "order_recovery";
 
 const SQLITE = [
   `CREATE TABLE IF NOT EXISTS owner_auth (
@@ -35,6 +35,13 @@ const SQLITE = [
     status TEXT NOT NULL DEFAULT 'active',
     withdrawn_at TEXT
   )`,
+  `CREATE TABLE IF NOT EXISTS order_access (
+    order_id TEXT PRIMARY KEY REFERENCES orders(id), token_hash BLOB NOT NULL,
+    expires INTEGER NOT NULL, nonce BLOB NOT NULL, tag BLOB NOT NULL, sealed BLOB NOT NULL, origin TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS orders_unpaid_expiration ON orders(json_extract(payload,'$.reservationExpiresAt'),id)
+    WHERE json_extract(payload,'$.status')='awaiting_transfer' AND json_type(payload,'$.reservationExpiresAt')='text'
+    AND json_extract(payload,'$.transferReport') IS NULL`,
   `CREATE TABLE IF NOT EXISTS shipping_quotes (
     id TEXT PRIMARY KEY,
     fingerprint TEXT NOT NULL,
@@ -185,7 +192,7 @@ const SQLITE = [
 export function schemaStatements() { return SQLITE; }
 
 export const TABLE_ORDER = Object.freeze([
-  "owner_auth", "owner_settings", "orders", "vip_members", "shipping_quotes",
+  "owner_auth", "owner_settings", "orders", "order_access", "vip_members", "shipping_quotes",
   "shipping_jobs", "products", "product_images", "variants", "inventory",
   "inventory_movements", "order_reservations", "customers", "customer_identities",
   "customer_sessions", "customer_tokens", "customer_oauth", "customer_orders",

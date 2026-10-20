@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, openSync, closeSync, fsyncSync } from "node:fs";
 import path from "node:path";
 import { createEmailTransport, renderOrderEmail, validEmail } from "./email.mjs";
+import { transferInstructions } from "./bank-transfer.mjs";
 
 const events = new Set(["requested", "awaiting_transfer", "paid", "shipped", "delivered", "cancelled"]);
 const windowMs = 23 * 60 * 60 * 1000; // Margin below Resend's 24-hour idempotency retention.
@@ -10,7 +11,7 @@ const windowMs = 23 * 60 * 60 * 1000; // Margin below Resend's 24-hour idempoten
 // transactions. A single application instance owns this directory, like the
 // SQLite service itself. An explicit directory preserves existing journals.
 export async function createEmailOutbox({ databasePath, outboxDirectory, listOrders, contactUrl = "", env, fetcher, logger = console.info,
-  now = Date.now, timeoutMs, autoStart = true } = {}) {
+  now = Date.now, timeoutMs, autoStart = true, recoveryUrl } = {}) {
   const transport = createEmailTransport({ env, fetcher, timeoutMs });
   const directory = outboxDirectory
     ? path.resolve(outboxDirectory)
@@ -44,15 +45,24 @@ export async function createEmailOutbox({ databasePath, outboxDirectory, listOrd
     if (!healthy) return;
     try {
       orderStatuses.set(order.id, order.status);
-      for (const entry of order.history ?? []) {
-        if (!events.has(entry.status)) continue;
-        for (const audience of entry.status === "requested" ? ["owner", "buyer"] : ["buyer"]) {
-          const id = createHash("sha256").update(`offcode-email-v1/${order.id}/${entry.status}/${audience}`).digest("hex");
+      for (const [index, entry] of (order.history ?? []).entries()) {
+        // A buyer's transfer notice keeps the order state, so it only alerts the
+        // owner and can never replace or supersede a buyer email.
+        const reported = entry.event === "transfer_reported";
+        if (!reported && !events.has(entry.status)) continue;
+        const event = reported ? "transfer_reported" : entry.status;
+        // New orders alert the owner, whether they start as a request or, after
+        // a quoted checkout, already awaiting the transfer.
+        const audiences = reported ? ["owner"]
+          : event === "requested" || (index === 0 && event === "awaiting_transfer") ? ["owner", "buyer"] : ["buyer"];
+        for (const audience of audiences) {
+          const id = createHash("sha256").update(`offcode-email-v1/${order.id}/${event}/${audience}`).digest("hex");
           if (jobs.has(id)) continue;
           const to = audience === "owner" ? transport.owner : order.customer?.email;
-          const obsolete = audience === "buyer" && entry.status !== "requested" && entry.status !== order.status;
-          const invalid = !validEmail(to) || (entry.status === "shipped" && !order.tracking) ||
-            (entry.status === "awaiting_transfer" && !Number.isSafeInteger(order.totalCents));
+          const obsolete = audience === "buyer" && event !== "requested" && event !== order.status;
+          const withTotal = event === "awaiting_transfer" || event === "transfer_reported";
+          const invalid = !validEmail(to) || (event === "shipped" && !order.tracking) ||
+            (withTotal && !Number.isSafeInteger(order.totalCents));
           const state = baseline || !transport.enabled || invalid ? "skipped" : obsolete ? "superseded" : "pending";
           let supportUrl = "";
           if (audience === "buyer") {
@@ -64,17 +74,24 @@ export async function createEmailOutbox({ databasePath, outboxDirectory, listOrd
               }
             } catch {}
           }
+          const transfer = audience === "buyer" && event === "awaiting_transfer" ? transferInstructions(order) : null;
           // Only whitelisted template facts and a public support URL. Never
-          // customer name/address/phone/bank/notes or an authenticated URL.
+          // customer name/address/phone/notes or a plaintext access URL. The
+          // receiving account appears only in the buyer's transfer instructions.
           const data = state === "pending" ? {
-            template: 2, orderId: order.id, event: entry.status, audience,
+            template: order.orderRecovery ? 4 : 3, orderId: order.id, event, audience,
             from: transport.from, to,
             items: order.items.map(({ size, qty }) => ({ size, qty })),
-            totalCents: entry.status === "awaiting_transfer" ? order.totalCents : null,
-            tracking: entry.status === "shipped" ? order.tracking : "",
+            totalCents: withTotal ? order.totalCents : null,
+            tracking: event === "shipped" ? order.tracking : "",
             supportUrl,
+            concept: audience === "owner" && withTotal && typeof order.transferConcept === "string" ? order.transferConcept : "",
+            transfer: transfer ? { bank: transfer.bank, beneficiary: transfer.beneficiary, clabe: transfer.clabe, concept: transfer.concept } : null,
+            reportedAt: reported ? entry.at : null,
+            ...(order.orderRecovery ? { orderRecovery: audience === "buyer" ? order.orderRecovery : null,
+              cancellationReason: order.cancellation?.reason === "unpaid_transfer_expired" ? "unpaid_transfer_expired" : null } : {}),
           } : null;
-          const job = { id, orderId: order.id, event: entry.status, audience, state, attempts: 0,
+          const job = { id, orderId: order.id, event, audience, state, attempts: 0,
             code: baseline ? "historical" : !transport.enabled ? transport.reason : invalid ? "invalid_data" : state,
             createdAt: now(), firstAttempt: null, nextAttempt: 0, data };
           put(job);
@@ -133,7 +150,11 @@ export async function createEmailOutbox({ databasePath, outboxDirectory, listOrd
         if (job.nextAttempt > now() || (job.state !== "pending" && job.attempts >= 3)) continue;
         job = { ...job, state: "sending", attempts: job.attempts + 1, firstAttempt: job.firstAttempt ?? now() };
         put(job); // Durable BEFORE contacting Resend; restart keeps the same key and facts.
-        const outcome = await transport.send(renderOrderEmail(job.data), job.id);
+        // The authenticated URL exists only in memory during delivery. The
+        // durable job contains an encrypted envelope, never a raw bearer.
+        const data = job.data.template === 4 && job.data.orderRecovery
+          ? { ...job.data, recoveryUrl: recoveryUrl(job.orderId, job.data.orderRecovery) } : job.data;
+        const outcome = await transport.send(renderOrderEmail(data), job.id);
         put({ ...job, ...outcome, nextAttempt: now() + Math.min(15 * 60e3, 60e3 * 2 ** (job.attempts - 1)),
           ...(outcome.state === "accepted" ? { data: null } : {}) });
         log(outcome.code, jobs.get(job.id));
