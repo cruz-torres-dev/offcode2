@@ -6,6 +6,10 @@ import { checkoutDom } from "./helpers/checkout-dom.mjs";
 import { buyerMessage } from "../dist/order-support.js";
 import { privacyPage } from "../scripts/build-privacy.mjs";
 
+// Git may deliver text with CRLF depending on the checkout settings while the
+// generator always emits LF. Compare content, not line terminators.
+const lf = (text) => text.replace(/\r\n/g, "\n");
+
 test("Transferencia: método obligatorio; los datos bancarios aparecen solo al guardar el pedido y quedan congelados", async () => {
   const app = await checkoutApp();
   try {
@@ -92,7 +96,7 @@ test("Transferencia visible: aparece tras elegir tarifa y desaparece al invalida
 test("Privacidad: HTML completo generado desde la fuente canónica, fecha vigente y sin plataformas ajenas", async () => {
   const source = await readFile(new URL("../docs/politica-privacidad.md", import.meta.url), "utf8");
   const expected = privacyPage(source), saved = await readFile(new URL("../dist/privacidad.html", import.meta.url), "utf8");
-  assert.equal(saved, expected, "Ejecuta node scripts/build-privacy.mjs al cambiar la fuente");
+  assert.equal(lf(saved), lf(expected), "Ejecuta node scripts/build-privacy.mjs al cambiar la fuente");
   assert.equal((saved.match(/<h2>/g) || []).length, 17);
   assert.match(saved, /Última actualización: 20 de octubre de 2026/);
   assert.doesNotMatch(saved, /shopify|shop pay/i);

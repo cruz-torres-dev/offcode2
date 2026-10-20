@@ -5,6 +5,9 @@ import { checkoutApp } from "./helpers/checkout-app.mjs";
 import { privacyPage } from "../scripts/build-privacy.mjs";
 
 const read = (path) => readFile(new URL("../" + path, import.meta.url), "utf8");
+// Git may deliver text with CRLF depending on the checkout settings while the
+// generator always emits LF. Compare content, not line terminators.
+const lf = (text) => text.replace(/\r\n/g, "\n");
 
 test("Aviso antiguo: no sirve una segunda política y redirige a la canónica", async () => {
   const app = await checkoutApp();
@@ -40,15 +43,16 @@ test("Rutas: la canónica responde y la heredada llega al mismo documento", asyn
   } finally { await app.close(); }
 });
 
-test("Fuente histórica intacta y separada de la canónica", async () => {
-  const original = await read("docs/politica-privacidad-original.md");
+test("Fuente canónica íntegra y separada de la histórica", async () => {
   const source = await read("docs/politica-privacidad.md");
-  assert.match(original, /Relación con Shopify/);
-  assert.match(original, /Última actualización: 20 de julio de 2026/);
-  assert.equal((original.match(/^## /gm) || []).length, 13);
   assert.doesNotMatch(source, /shopify/i);
   assert.match(source, /Última actualización: 20 de octubre de 2026/);
-  assert.equal(await read("dist/privacidad.html"), privacyPage(source));
+  assert.equal(lf(await read("dist/privacidad.html")), lf(privacyPage(source)));
+  // The historical backup is untracked: a clean checkout must regenerate the
+  // page from the canonical source alone, so the generator cannot reference it.
+  const build = await read("scripts/build-privacy.mjs");
+  assert.match(build, /docs\/politica-privacidad\.md/);
+  assert.doesNotMatch(build, /politica-privacidad-original\.md/);
 });
 
 test("Página y modal consumen el mismo documento", async () => {

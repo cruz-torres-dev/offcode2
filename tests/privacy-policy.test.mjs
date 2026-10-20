@@ -5,6 +5,9 @@ import { checkoutApp } from "./helpers/checkout-app.mjs";
 import { privacyPage } from "../scripts/build-privacy.mjs";
 
 const read = (path) => readFile(new URL("../" + path, import.meta.url), "utf8");
+// Git may deliver text with CRLF depending on the checkout settings while the
+// generator always emits LF. Compare content, not line terminators.
+const lf = (text) => text.replace(/\r\n/g, "\n");
 
 test("Política pública: sin referencias ni enlaces a Shopify", async () => {
   const source = await read("docs/politica-privacidad.md");
@@ -23,16 +26,17 @@ test("Política pública: sin referencias ni enlaces a Shopify", async () => {
 test("Generación: dist/privacidad.html proviene de docs/politica-privacidad.md", async () => {
   const source = await read("docs/politica-privacidad.md");
   const saved = await read("dist/privacidad.html");
-  assert.equal(saved, privacyPage(source), "Ejecuta node scripts/build-privacy.mjs al cambiar la fuente");
+  assert.equal(lf(saved), lf(privacyPage(source)), "Ejecuta node scripts/build-privacy.mjs al cambiar la fuente");
   assert.match(saved, /Última actualización: 20 de octubre de 2026/);
   assert.equal((saved.match(/<h2>/g) || []).length, 17);
   assert.match(saved, /<meta name="robots" content="noindex,nofollow"/);
   assert.doesNotMatch(saved, /<script\b|<iframe\b/);
   assert.doesNotMatch(saved, /privacy-review|Documento original pendiente de revisión/);
-  // The historical backup stays intact and is not the public content.
-  const original = await read("docs/politica-privacidad-original.md");
-  assert.match(original, /shopify/i);
-  assert.notEqual(original.trim(), source.trim());
+  // The public page carries the canonical date only. The historical backup is
+  // untracked, so reproducibility cannot depend on reading it here.
+  assert.deepEqual(saved.match(/Última actualización: [^<]+/g), [
+    "Última actualización: 20 de octubre de 2026",
+  ]);
 });
 
 test("Página y modal comparten exactamente el mismo documento", async () => {
