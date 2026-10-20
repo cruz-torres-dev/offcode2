@@ -10,10 +10,10 @@ El flujo implementado es:
 
 1. El cliente elige talla y cantidad en la colección.
 2. Si la recepción de pedidos está habilitada, completa contacto y dirección en México.
-3. Con Envia configurado, el cliente consulta servicios exclusivamente FedEx, elige una tarifa y ve prendas, envío y total. Antes de consultar acepta compartir datos de entrega según el aviso. El servidor guarda una solicitud con referencia única y recalcula $1,650 MXN por prenda; no acepta precios ni servicios inventados desde el navegador. Un reintento con la misma referencia no duplica la solicitud.
-4. El propietario entra al panel y verifica existencia de las tallas antes de confirmar el total. Puede volver a cotizar FedEx. Sin Envia configurado captura el costo de una guía FedEx cotizada fuera del sistema.
-5. El panel prepara el total y los datos de transferencia para compartir por WhatsApp. El propietario revisa y envía el mensaje; no se envía automáticamente.
-6. El propietario comprueba el abono en su banco y marca el pago verificado. Un comprobante o una captura no se procesa como confirmación automática.
+3. Con Envia configurado, el cliente consulta servicios exclusivamente FedEx, elige una tarifa y ve prendas, envío y total. Antes de consultar acepta compartir datos de entrega según el aviso. Al aceptar el total y confirmar, el servidor recalcula $1,650 MXN por prenda (no acepta precios ni servicios inventados desde el navegador), reserva las unidades y guarda el pedido con referencia única directamente en `awaiting_transfer` (Pendiente de transferencia). Un reintento con la misma clave no duplica el pedido.
+4. La confirmación muestra «Realiza tu transferencia bancaria» con titular, banco, CLABE, total exacto, referencia y un concepto estable (`OFFCODE OF…`, solo letras, números y espacios, máximo 40 caracteres). Los datos bancarios se copian de la configuración privada del propietario al pedido en ese momento; si la cuenta está incompleta, el pedido se rechaza con 503 sin reservar nada.
+5. El comprador puede pulsar «Ya realicé la transferencia» y confirmar. El aviso queda en el historial con fecha, no cambia el estado, el total, las existencias ni la guía, y avisarlo de nuevo no crea un segundo registro. El panel muestra «TRANSFERENCIA REPORTADA — VERIFICAR EN BANCO» con referencia, total, concepto, cuenta y fecha del aviso. Los pedidos sin cotización automática siguen el camino anterior: el propietario verifica existencias y confirma el total desde el panel.
+6. El propietario comprueba el abono en su banco y marca el pago verificado. Ni el aviso del comprador ni un comprobante o captura se procesan como confirmación automática.
 7. Tras verificar la transferencia, el propietario consulta una tarifa vigente del servicio acordado y autoriza comprar la guía con saldo de Envia. La guía PDF y el rastreo aparecen en su panel. Comprar la guía no marca el pedido como enviado: debe confirmar que entregó físicamente el paquete a FedEx. Sin integración configurada registra una guía FedEx comprada por separado.
 8. Tras confirmar la entrega, marca el pedido como entregado. El historial conserva los cambios de estado.
 
@@ -162,7 +162,15 @@ Cada pedido del panel incluye **Atención al comprador** con un mensaje preparad
 
 `contacto.html?pedido=OF-…` conserva la referencia para WhatsApp y el formulario de correo. El soporte por WhatsApp permanece disponible con pedidos cerrados si el vendedor ya guardó su número. El formulario de correo se muestra cuando su transporte está configurado. La consulta por correo llega al buzón `ORDER_NOTIFICATION_EMAIL` con la referencia y el correo del comprador como dirección de respuesta; la referencia no permite consultar datos de un pedido sin autenticación.
 
-Los nuevos avisos transaccionales usan plantilla 2: incluyen un enlace HTTPS de atención con la referencia y, al marcar enviado, un enlace de rastreo FedEx cuando el número permite generarlo. No incluyen CLABE, domicilio ni teléfono del comprador. Los trabajos pendientes de plantilla 1 conservan su contenido y clave de idempotencia originales; no se reenvían mensajes ya aceptados ni se activa el correo automáticamente.
+Los avisos transaccionales usan plantilla 3 (la 2 sin cambios, más los datos de transferencia): incluyen un enlace HTTPS de atención con la referencia y, al marcar enviado, un enlace de rastreo FedEx cuando el número permite generarlo. Solo el correo al comprador de un pedido pendiente de transferencia incluye titular, banco, CLABE, total exacto y concepto, tomados de la cuenta guardada en el pedido. Ningún correo incluye domicilio ni teléfono del comprador. Los trabajos pendientes de plantilla 1 conservan su contenido y clave de idempotencia originales; no se reenvían mensajes ya aceptados ni se activa el correo automáticamente.
+
+### Datos de transferencia y aviso del comprador
+
+- La página de confirmación (`checkout.html?pedido=OF-…`) reutiliza una llave del pedido y la sesión verificada de la cuenta vinculada. Los pedidos nuevos también incluyen un enlace privado en el correo de confirmación para volver después de cerrar la pestaña. El enlace se intercambia por una cookie privada limitada a ese pedido; la referencia sola nunca autoriza a consultar ni reportar una transferencia. Véase «Recuperación segura y caducidad de reservas» al final de este documento.
+- `POST /api/orders/:id/transfer` devuelve al comprador sus importes, artículos y, mientras el pago esté pendiente, los datos de transferencia. Nunca devuelve domicilio, teléfono ni historial interno.
+- `POST /api/orders/:id/transfer-report` exige `confirmed: true`. El primer aviso responde 201 y guarda `transferReport` con fecha y canal; los siguientes responden 200 con «Ya recibimos tu aviso de transferencia. Estamos verificando el depósito.» Con el pedido pagado, enviado, entregado, cancelado o sin datos de transferencia responde 409.
+- El panel ofrece el filtro «Transferencia reportada» y el contador correspondiente en el resumen. «Marcar pago verificado» funciona igual que antes: el aviso no lo sustituye.
+- Si el propietario cambia su cuenta bancaria, los pedidos ya creados conservan la cuenta que se mostró al comprador.
 
 ### Variables privadas
 
@@ -180,15 +188,17 @@ Al recibir una solicitud de pedido:
 - **Propietario**: aviso de nuevo pedido con la referencia y un resumen mínimo (tallas y cantidades). No incluye nombre, teléfono, domicilio ni notas del cliente.
 - **Comprador**: confirmación de que la solicitud fue recibida, solo si su dirección es válida. Aclara que recibir la solicitud no confirma disponibilidad, pago ni envío.
 
+Un pedido cotizado nace pendiente de transferencia: el propietario recibe «Nuevo pedido pendiente de transferencia» y el comprador «Realiza tu transferencia bancaria» con titular, banco, CLABE, total exacto y concepto. Cuando el comprador avisa que transfirió, solo el propietario recibe «Transferencia reportada: verifica en tu banco» con referencia, total, concepto y fecha del aviso; el aviso repetido no genera otro correo.
+
 Al cambiar el estado, únicamente cuando el servidor acepta una transición válida:
 
-- `awaiting_transfer`: instrucciones de transferencia con el total confirmado y la referencia. **No incluye CLABE ni datos bancarios**: remite al canal de atención acordado.
+- `awaiting_transfer`: instrucciones de transferencia con el total confirmado, la referencia, el concepto y los datos bancarios guardados en el pedido.
 - `paid`: pago verificado, sin afirmar que el paquete ya salió.
 - `shipped`: pedido enviado con el rastreo real registrado en el panel. Si el pedido no tiene rastreo, el correo se omite en lugar de inventarlo.
 - `delivered`: entrega confirmada.
 - `cancelled`: cancelación confirmada, sin prometer ni ejecutar un reembolso.
 
-Las repeticiones y las transiciones inválidas responden 409 y no generan correo. Cada mensaje tiene versión HTML (identidad oscura y editorial) y alternativa de texto plano, en español. Nunca se incluyen: datos bancarios, domicilio completo, teléfono, notas, importes sin confirmar, fechas de entrega ni números de guía inventados. Un estado histórico que ya fue superado se marca `superseded` y no se envía.
+Las repeticiones y las transiciones inválidas responden 409 y no generan correo. Cada mensaje tiene versión HTML (identidad oscura y editorial) y alternativa de texto plano, en español. Nunca se incluyen: datos bancarios fuera del correo de transferencia al comprador, domicilio completo, teléfono, notas, importes sin confirmar, fechas de entrega ni números de guía inventados. Un estado histórico que ya fue superado se marca `superseded` y no se envía.
 
 ### Fiabilidad, duplicados y reintentos
 
@@ -390,3 +400,54 @@ Validación local de la etapa SQLite anterior (17 de octubre de 2026): `npm ci` 
 ## Cuentas de clientes y Contacto
 
 La migración 2 añade cuentas de cliente sin resembrar el catálogo de versión 1, sin cambiar la ruta ni activar ventas. El acceso de cliente está separado del propietario. Registro, verificación, recuperación, perfil/dirección y pedidos propios se documentan en [CUENTAS.md](CUENTAS.md), incluidas las variables privadas, límites y pruebas pendientes. Instalar con npm ci antes de iniciar; el dashboard de Render no se cambia desde el repositorio. La entrega de correos reales en producción queda pendiente. La etapa actual queda sin commit, push ni despliegue.
+
+## Recuperación segura y caducidad de reservas
+
+La versión de esquema 4 añade `order_access` y un índice parcial para localizar reservas pendientes vencidas. No reescribe pedidos, fechas, reservas ni movimientos históricos. Conservar el respaldo y el disco SQLite existente; nunca cambiar `DATABASE_PATH` para que el despliegue parezca nuevo.
+
+### Volver a un pedido sin conservar la pestaña
+
+- El servidor crea una llave aleatoria de 256 bits por pedido. La misma llave sirve para la pestaña de confirmación, el enlace del correo y la cookie limitada al pedido. Los endpoints de consulta y aviso siguen siendo los existentes.
+- Los correos nuevos usan plantilla 4 y añaden **Consultar mi pedido**. El enlace lleva el secreto solo en un fragmento `#access=…`; no registrar, copiar a reportes ni compartir ese enlace. El frontend retira el fragmento inmediatamente y hace `POST /api/orders/:id/access`, sujeto al mismo origen y límites de intentos.
+- El intercambio entrega una cookie `HttpOnly`, `SameSite=Lax`, host exclusivo y `Path=/api/orders/:id/`. En producción lleva `Secure` y prefijo `__Secure-`. No es una sesión administrativa ni permite consultar otro pedido. El servidor valida su vencimiento en cada acceso.
+- La base guarda SHA-256 para autenticar y una copia cifrada AES-256-GCM para poder reconstruir exactamente el mismo enlace en reintentos del correo. El journal solo recibe el sobre cifrado, no la URL con la llave. La URL descifrada existe en memoria durante el envío al proveedor. La clave de cifrado se deriva de `SETTINGS_ENCRYPTION_KEY`; en instalaciones sin esa clave se deriva de `ADMIN_PASSWORD`. No se crea ni cambia ninguna de estas variables automáticamente.
+- Mantener la clave privada original estable y respaldada. La derivación es exacta y no guarda la clave anterior: `sha256("offcode-order-access-key-v1" ‖ bytes(SETTINGS_ENCRYPTION_KEY))` cuando esa variable existe; si no, `scrypt(ADMIN_PASSWORD, "offcode-order-access-key-v1", 32)`. Cambiar cualquiera de las dos tiene el mismo efecto, porque el sobre no registra con qué clave se selló.
+  - **Sigue funcionando:** cualquier enlace ya recibido. Se autentica con `token_hash` (SHA-256 sin clave) y su fecha original; no depende de la clave de entrega.
+  - **Deja de abrirse:** `order_access.sealed` y el `orderRecovery` de los trabajos de plantilla 4 pendientes. `recoveryUrl()` lanza al descifrar, el trabajador marca la outbox como `worker_failed` y **detiene la cola completa** hasta reiniciar con una clave válida. No es un fallo aislado del trabajo afectado.
+  - **También falla:** repetir la creación de un pedido antiguo (`POST /api/orders` con la misma `requestKey`), porque la respuesta necesita reconstruir la llave a partir del sobre. Un pedido nuevo con la clave nueva funciona normal; la base queda con sobres de dos claves sin columna que las distinga.
+  - Antes de tocar la variable en Render: comprobar que `SETTINGS_ENCRYPTION_KEY` existe y son 64 hex, que no se rota junto con `ADMIN_PASSWORD`, y que el respaldo de la clave y del disco viven fuera del repositorio. Si hay que rotarla, drenar antes la outbox y conservar la anterior para los pendientes; esta entrega no incluye migración de sobres.
+- Las cuentas verificadas vinculadas siguen usando su autenticación y sus consultas propias. Un invitado nunca obtiene acceso solo con la referencia ni se vincula automáticamente por conocer un correo.
+- Las llaves antiguas de pestaña se pueden actualizar una vez cuando el pedido aún está dentro del plazo configurado de acceso contado desde su creación. El servidor genera la sustituta aleatoria y el cliente actualiza su copia. No se asigna por ello una caducidad de inventario al pedido histórico ni se reenvían sus correos. Un invitado histórico que perdió su llave y cuyo correo antiguo no contiene enlace necesita atención del propietario; la referencia no permite recuperar acceso por sí sola.
+
+La outbox conserva sus identificadores y cuerpos de plantillas 1–3. No se convierten ni reintentan trabajos anteriores por esta mejora. Los trabajos nuevos de plantilla 4 conservan el mismo enlace y origen en cada reintento, incluso tras reiniciar. Un pedido puede guardarse aunque el correo falle; reintentar la creación con la misma referencia devuelve el mismo pedido. `accepted` solo significa aceptación por el proveedor, no entrega al buzón. Las ventanas de reintento, estados inciertos y revisión manual siguen siendo los existentes. Sin correo habilitado no se puede prometer la recepción del enlace; la pantalla indica conservar la referencia y contactar a OFFCODE si no llega.
+
+### Duraciones opcionales
+
+- `ORDER_RESERVATION_TTL_HOURS`: **48 horas** por defecto; entero de **1 a 168**. Cada solicitud nueva guarda `reservationExpiresAt` calculado por el servidor.
+- `ORDER_ACCESS_TTL_HOURS`: **720 horas (30 días)** por defecto; entero de **24 a 2160 (90 días)**. Debe cubrir al menos la duración de reserva. La fecha se guarda en la credencial y no se extiende al abrir el enlace o recargar.
+- Ausencia de variables: se usan esos valores. Valores vacíos, fraccionarios, negativos, fuera del rango o con unidades causan error al iniciar; no se recortan ni sustituyen silenciosamente.
+- Cambiar una duración solo afecta a solicitudes nuevas. Las fechas existentes permanecen como se guardaron. Este trabajo no cambió variables de Render, `.env` ni `ORDERS_ENABLED`.
+
+### Liberación segura de existencias
+
+La caducidad automática puede cancelar un pedido en `awaiting_transfer` **o** en `requested`, siempre con fecha explícita vencida, reserva activa, sin aviso de transferencia, sin evidencia de pago verificado y sin operación de guía. Ambos estados retienen existencias con un plazo explícito: `awaiting_transfer` ya mostró los datos bancarios y admite el aviso de transferencia; `requested` nunca los muestra ni admite ese aviso, de modo que excluirlo dejaba la reserva bloqueada indefinidamente. Los pedidos pagados, enviados, entregados, cancelados, con reserva ya cerrada o con cualquier fila en `shipping_jobs` no se liberan.
+
+Casos que siguen requiriendo intervención del propietario: pedidos históricos sin `reservationExpiresAt` (nunca reciben fecha retroactiva y no se cancelan solos); pedidos `requested` creados por API con Envia deshabilitado cuyo dueño cotiza a mano fuera de la aplicación —si vas a enviar datos bancarios manualmente, pasa primero el pedido a `awaiting_transfer` en el panel—; y depósitos recibidos después de una cancelación ya confirmada, que se resuelven por atención y no con una reactivación automática.
+
+El servidor reevalúa el pedido y la reserva dentro de `BEGIN IMMEDIATE`, reutiliza `catalog.release` y escribe la cancelación en la misma transacción. Queda `cancellation.reason=unpaid_transfer_expired`, fecha, `reservationExpiresAt` original y `cancellation.previousStatus` (el estado que tenía al vencer), más el evento `reservation_expired` en el historial; el movimiento de liberación registra el mismo motivo y actor `system`. No cambia la existencia física. El aviso de transferencia y la verificación del propietario siguen serializados con estos cambios: un pedido cancelado rechaza el aviso o el pago; un aviso ya aceptado protege la reserva para revisión bancaria. Un fallo revierte conjuntamente pedido, reserva y movimientos.
+
+Hay una pasada al arrancar y un temporizador interno cada 60 segundos. Cada lote revisa como máximo 25 candidatos; si aún hay trabajo, el siguiente lote cede al bucle de eventos. También hay ejecución oportunista al consultar catálogo/pedidos y comprobación específica antes de consultar o actuar sobre un pedido. Así, un servicio que estuvo detenido retoma las reservas vencidas al volver a arrancar; no depende de que Render mantenga un proceso dormido ejecutándose. Con el servicio detenido no hay ejecución ni promesa de cancelación al segundo exacto.
+
+La aplicación mantiene la arquitectura de un servicio con una instancia y disco persistente descrita en `render-orders.yaml`. SQLite serializa incluso dos procesos que intenten expirar la misma reserva, pero el journal de correo sigue teniendo un único proceso propietario, como antes; no desplegar dos trabajadores de outbox sobre el mismo directorio sin un diseño específico de coordinación.
+
+La cancelación automática genera como máximo un trabajo de correo por evento/destinatario mediante la outbox. Si la captura del trabajo se interrumpe después del commit, el arranque con el journal ya inicializado vuelve a descubrir el evento persistido con la misma clave. No se reenvían trabajos aceptados ni se fabrican verificaciones de pago, cargos o guías.
+
+### Revisión operativa antes de una publicación autorizada
+
+1. Revisar diff, reportes y respaldos del SQLite y la outbox; conservar las claves privadas originales. La migración es aditiva. Después de migrar, no hacer rollback de código a esquema 3 contra esa base: el chequeo de versión lo rechaza. Cualquier reversión de datos requiere un respaldo y revisión explícita.
+2. Revisar las duraciones elegidas y recordar que los históricos sin fecha quedan protegidos para revisión manual. No ejecutar actualizaciones masivas que calculen fechas retroactivas.
+3. Verificar que el correo transaccional esté configurado y que el enlace conserve el fragmento en el proveedor. No activar seguimiento de enlaces que exponga o altere la llave sin revisar su efecto. La prueba real de recepción permanece pendiente de autorización; esta etapa solo usó un transporte simulado.
+4. En el panel, los vencidos llevan **Reserva vencida · cancelación automática**, motivo e historial. Los avisos reportados siguen pendientes de verificación y protegidos; no marcarlos pagados sin comprobar el abono en el banco.
+5. Si alguien transfirió después de que su pedido ya hubiera vencido, no intentar el aviso normal ni marcar la solicitud cancelada como pagada: revisar el abono y resolver por atención del propietario. Iniciar otra solicitud no ejecuta un reembolso ni vincula el depósito automáticamente.
+
+Reporte y evidencias de esta etapa: `qa/reporte-recuperacion-y-expiracion.md` y `qa/recuperacion-y-expiracion/`. Las capturas usan datos ficticios y ocultan llaves, cookies, contraseñas y CLABE. La suite usa el bloqueo de red existente; no se consultó producción.

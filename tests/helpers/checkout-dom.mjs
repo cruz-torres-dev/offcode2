@@ -11,10 +11,10 @@ class Element {
   reportValidity() { return true; }
   focus() { this.focused = true; }
 }
-export async function checkoutDom(config, { bag = [{ size: "M", qty: 1 }], fetcher, now = Date.now() } = {}) {
+export async function checkoutDom(config, { bag = [{ size: "M", qty: 1 }], fetcher, now = Date.now(), search = "", hash = "", session = {} } = {}) {
   const html = await readFile(new URL("../../dist/checkout.html", import.meta.url), "utf8");
   const source = await readFile(new URL("../../dist/checkout.js", import.meta.url), "utf8");
-  const nodes = new Map([...html.matchAll(/<([a-z]+)\b([^>]*\bid="([^"]+)"[^>]*)>/g)].map(([, tag, attrs, id]) => {
+  const nodes = new Map([...html.matchAll(/<([a-z][a-z0-9]*)\b([^>]*\bid="([^"]+)"[^>]*)>/g)].map(([, tag, attrs, id]) => {
     const node = new Element(tag); node.hidden = /\bhidden\b/.test(attrs); node.disabled = /\bdisabled\b/.test(attrs);
     node.href = attrs.match(/\bhref="([^"]*)"/)?.[1] || "";
     return ["#" + id, node];
@@ -23,14 +23,18 @@ export async function checkoutDom(config, { bag = [{ size: "M", qty: 1 }], fetch
   Object.assign(nodes.get("#payment-transfer"), { checked: true, value: "bank_transfer" });
   nodes.get("#order-form").elements = { namedItem: (name) => fields[name] };
   nodes.get("#state-text").replaceWith = (node) => { fields.state = node; };
-  const storage = new Map([["offcode-bag", JSON.stringify(bag)]]), requests = [], timers = new Map();
+  const storage = new Map([["offcode-bag", JSON.stringify(bag)], ...Object.entries(session)]), requests = [], timers = new Map();
+  const history = [], copied = [], bodyClasses = new Set();
   let clock = now, timerId = 0;
   const descendants = (node) => node.children.flatMap((child) => typeof child === "object" ? [child, ...descendants(child)] : []);
   const document = { querySelector: (selector) => nodes.get(selector), createElement: (tag) => new Element(tag),
+    body: { classList: { add: (name) => bodyClasses.add(name), contains: (name) => bodyClasses.has(name) } },
     querySelectorAll: (selector) => selector.includes("summary-editors") ? descendants(nodes.get("#order-items")).filter((node) => node.tag === "input" || (selector.includes("select") && node.tag === "select")) : [],
   };
   const pending = [];
-  const context = vm.createContext({ document, URL, window: { addEventListener() {} }, location: { reload() {} },
+  const context = vm.createContext({ document, URL, URLSearchParams, location: { reload() {}, search, hash, pathname: "/checkout.html" },
+    window: { addEventListener() {}, history: { replaceState: (state, title, url) => history.push(url) } },
+    navigator: { clipboard: { writeText: async (value) => { copied.push(value); } } },
     Option: class extends Element { constructor(text, value) { super("option"); this.textContent = text; this.value = value; } },
     sessionStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
     crypto: { randomUUID: () => "12345678-1234-4234-8234-123456789abc" },
@@ -46,7 +50,7 @@ export async function checkoutDom(config, { bag = [{ size: "M", qty: 1 }], fetch
   });
   const flush = async () => { for (let i = 0; i < 5; i++) { await Promise.all(pending); await new Promise((resolve) => setImmediate(resolve)); } };
   vm.runInContext(source, context); await flush();
-  return { nodes, fields, storage, requests, flush, descendants,
+  return { nodes, fields, storage, requests, flush, descendants, history, copied, bodyClasses,
     advance(ms) { clock += ms; for (const [id, timer] of [...timers]) if (timer.until <= clock) { timers.delete(id); timer.fn(); } },
   };
 }

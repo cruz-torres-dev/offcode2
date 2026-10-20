@@ -35,7 +35,7 @@ test("Checkout: exige aceptación booleana del total completo e impide imponer o
     const created = await app.call("/api/orders", app.request(rate, { unitCents: 1, subtotalCents: 1, shippingCents: 1, totalCents: 2 }));
     assert.equal(created.status, 201); assert.equal(created.data.totalCents, 183520);
     const saved = JSON.parse((await app.db.get("SELECT payload FROM orders WHERE id=?", [created.data.id])).payload);
-    assert.equal(saved.totalCents, 183520); assert.equal(saved.shippingCents, 18520); assert.equal(saved.status, "requested");
+    assert.equal(saved.totalCents, 183520); assert.equal(saved.shippingCents, 18520); assert.equal(saved.status, "awaiting_transfer");
     assert.deepEqual(saved.totalAcceptance, { at: saved.createdAt, quoteId: rate.id, totalCents: 183520, currency: "MXN" });
     assert.equal(saved.tracking, ""); assert.equal((await app.db.get("SELECT reserved FROM inventory WHERE variant_id='VAR-HOODIE-M'")).reserved, 1);
     assert.equal(app.provider.generateCalls, 0);

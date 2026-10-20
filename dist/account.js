@@ -231,6 +231,11 @@ async function renderOrderDetail(version) {
     <p class="order-meta">${esc(longDate(order.createdAt))}</p>
     <section class="order-section" aria-label="Estado del pago y del envío">
       <h2>Pago</h2><p>${esc(order.payment.label)}</p>
+      ${order.cancellationReason === "unpaid_transfer_expired" ? '<p class="account-note">La reserva venció sin aviso de transferencia ni pago verificado. La solicitud fue cancelada; inicia una nueva solicitud para consultar disponibilidad. Si ya transferiste, contacta a OFFCODE.</p><a class="order-link" href="index.html#collection">Iniciar una nueva solicitud ↗</a>' : ""}
+      ${order.status === "awaiting_transfer" ? `<p class="account-note">${order.transferReport
+        ? "Recibimos tu aviso de transferencia. Estamos verificando el depósito; el pago se confirma solo después de comprobarlo en el banco."
+        : "Transfiere el total exacto con el concepto indicado y después avísanos desde la página del pedido."}</p>
+      <p><a class="order-link" href="checkout.html?pedido=${encodeURIComponent(order.id)}">${order.transferReport ? "Ver datos de transferencia" : "Ver datos de transferencia y avisar pago"}<span aria-hidden="true">→</span></a></p>` : ""}
       <h2>Envío</h2><p>${esc(order.shipping.label)}${order.shipping.description ? " · " + esc(order.shipping.description) : ""}</p>
       ${order.shipping.estimate ? `<p class="account-note">Entrega estimada: ${esc(order.shipping.estimate)}</p>` : ""}
       ${order.shipping.tracking ? `<p>${order.shipping.carrier ? "Guía " + esc(order.shipping.carrier) : "Guía"}: ${order.shipping.trackingUrl

@@ -20,7 +20,7 @@ Sigue [OPERACION.md](OPERACION.md) antes de habilitar ventas. El propietario pue
 ## Archivos principales
 
 - `dist/index.html`, `styles.css`, `app.js`, `logo.js`: tienda, campaña, galería, bolsa y monograma.
-- `dist/checkout.html` / `checkout.js`: dirección, consentimiento, cotización FedEx y solicitud.
+- `dist/checkout.html` / `checkout.js`: dirección, consentimiento, cotización FedEx, pedido, datos de transferencia y aviso «Ya realicé la transferencia».
 - `dist/admin.html` / `admin.js`: panel con seis secciones (resumen, pedidos, productos, inventario, envíos y configuración).
 - `dist/admin.css`: tema oscuro editorial del panel; no afecta a la tienda ni a la configuración.
 - `server/server.mjs`: API, sesiones y arranque del servidor.
@@ -74,7 +74,7 @@ Comprobaciones locales: `npm ci`, `npm test`, `npm run check:load`. El servidor 
 
 Integración opcional con Resend, desactivada por defecto y sin dependencias nuevas. Si falta configuración, la tienda, el checkout, el panel y Envia siguen funcionando igual y el servidor registra que los correos no están habilitados; no se simula ningún envío.
 
-Al recibir una solicitud se avisa al propietario (referencia y resumen mínimo) y se confirma la recepción al comprador si su dirección es válida. Al cambiar de estado se notifican solo transiciones confirmadas: instrucciones de transferencia sin datos bancarios, pago verificado, envío con el rastreo real, entrega y cancelación. Cada mensaje tiene versión HTML y texto plano en español, y nunca incluye CLABE, domicilio completo, teléfono ni datos inventados.
+Al recibir una solicitud se avisa al propietario (referencia y resumen mínimo) y se confirma la recepción al comprador si su dirección es válida. Al cambiar de estado se notifican solo transiciones confirmadas: instrucciones de transferencia, pago verificado, envío con el rastreo real, entrega y cancelación. Un pedido cotizado nace pendiente de transferencia y el comprador recibe titular, banco, CLABE, total exacto y concepto guardados en su pedido; cuando avisa que transfirió, solo el propietario recibe un aviso para verificar en el banco. Cada mensaje tiene versión HTML y texto plano en español, y nunca incluye domicilio completo, teléfono ni datos inventados.
 
 La cola se guarda en `<DATABASE_PATH>.email-outbox/`, fuera de SQLite y excluida de Git. Un hash de pedido, estado y destinatario evita duplicados; los reintentos reutilizan la misma clave de idempotencia; un fallo o timeout queda como resultado incierto y el pedido no se pierde ni se duplica. El panel muestra el estado por correo y permite reintentar cuando es seguro. La clave de Resend nunca llega al navegador, a las respuestas ni a los registros.
 

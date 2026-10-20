@@ -193,7 +193,7 @@ test("Activar pedidos y FedEx sin URLs legales permite cotizar y guardar una sol
     assert.equal(created.status, 201, JSON.stringify(created.data));
     assert.equal((await app.call("/api/orders", request)).status, 200, "un reintento no duplica el pedido");
     const row = await app.db.get("SELECT payload FROM orders WHERE id=?", [created.data.id]), order = JSON.parse(row.payload);
-    assert.equal(order.status, "requested");
+    assert.equal(order.status, "awaiting_transfer");
     assert.equal(order.shipping.carrier, "fedex"); assert.equal(order.shipping.environment, "production");
     assert.equal(order.shippingCents, 18520); assert.equal(order.totalCents, 183520);
     assert.ok(Number.isFinite(Date.parse(order.consent.at)));

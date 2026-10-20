@@ -622,7 +622,7 @@ test("Sin sesión o desde otro origen no se puede administrar catálogo ni inven
     );
     const summary = await app.call("/api/admin/summary");
     assert.equal(summary.status, 200);
-    assert.deepEqual(Object.keys(summary.data.orders).sort(), ["awaitingPayment", "pending", "pendingShipments", "toPrepare"]);
+    assert.deepEqual(Object.keys(summary.data.orders).sort(), ["awaitingPayment", "pending", "pendingShipments", "toPrepare", "transferReported"]);
     assert.ok(!JSON.stringify(summary).includes(password));
   } finally {
     await app.close();

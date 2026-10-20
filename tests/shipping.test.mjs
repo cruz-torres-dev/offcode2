@@ -212,24 +212,26 @@ async function createOrder(app) {
   await app.call("/api/session", "POST", { password });
   const id = created.data.id,
     route = "/api/admin/orders/" + id;
-  return { id, route, request };
+  return { id, route, request, accessToken: created.data.accessToken };
 }
-async function pay(app, route) {
-  const confirmed = await app.call(route, "PATCH", {
-    version: 1,
-    status: "awaiting_transfer",
-    stockConfirmed: true,
-    shippingCents: 1,
-  });
-  assert.equal(confirmed.status, 200);
-  assert.equal(confirmed.data.order.totalCents, 183520);
-  assert.equal(confirmed.data.order.shippingCents, 18520);
+// Quoted checkout orders start awaiting the transfer with the server total.
+// The buyer's notice and the owner's bank verification are the two writes
+// before any label work.
+async function pay(app, route, accessToken) {
+  const reported = await app.call(
+    route.replace("/api/admin/orders/", "/api/orders/") + "/transfer-report",
+    "POST",
+    { accessToken, confirmed: true },
+  );
+  assert.equal(reported.status, 201);
   const paid = await app.call(route, "PATCH", {
     version: 2,
     status: "paid",
     paymentVerified: true,
   });
   assert.equal(paid.status, 200);
+  assert.equal(paid.data.order.totalCents, 183520);
+  assert.equal(paid.data.order.shippingCents, 18520);
 }
 test("FedEx exclusivo: cotización ligada a datos, total del servidor, compra privada tras transferencia y entrega física", async () => {
   const mock = provider(),
@@ -320,7 +322,7 @@ test("FedEx exclusivo: cotización ligada a datos, total del servidor, compra pr
       ).status,
       409,
     );
-    await pay(app, route);
+    await pay(app, route, created.data.accessToken);
     const q = await app.call(route + "/shipping-rates", "POST", { version: 3 });
     const payload = {
       version: 3,
@@ -405,8 +407,8 @@ test("Compra concurrente: una sola llamada; error incierto se conserva tras rein
   const mock = provider();
   let app = await start(mock, { databasePath });
   try {
-    const { route } = await createOrder(app);
-    await pay(app, route);
+    const { route, accessToken } = await createOrder(app);
+    await pay(app, route, accessToken);
     const rates = await app.call(route + "/shipping-rates", "POST", {
       version: 3,
     });
@@ -548,8 +550,8 @@ test("Caducidad y recuperación de intento interrumpido: no se compra de nuevo s
       ).status,
       409,
     );
-    const { route, id } = await createOrder(app);
-    await pay(app, route);
+    const { route, id, accessToken } = await createOrder(app);
+    await pay(app, route, accessToken);
     db.prepare(
       "INSERT INTO shipping_jobs(order_id,state,payload) VALUES(?,'pending',?)",
     ).run(id, JSON.stringify({ environment: "sandbox" }));
@@ -637,7 +639,7 @@ test("El pedido guarda la tarifa validada, el servicio y el estimado de FedEx; i
     assert.equal(saved.totalCents, 183520);
     assert.equal(saved.carrier, "");
     assert.equal(saved.tracking, "");
-    assert.equal(saved.status, "requested");
+    assert.equal(saved.status, "awaiting_transfer");
   } finally {
     await app.close();
   }

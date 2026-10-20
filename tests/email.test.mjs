@@ -36,6 +36,8 @@ async function start(email = {}, databasePath = ":memory:") {
 }
 const forbidden = [env.RESEND_API_KEY, customer.street, customer.name, customer.phone, customer.notes, bank.name, bank.beneficiary, bank.clabe];
 function noSensitive(value) { for (const secret of forbidden) assert.ok(!JSON.stringify(value).includes(secret), secret); }
+// The buyer's transfer instructions are the only message allowed to carry the receiving account.
+function noPersonal(value) { for (const secret of forbidden.slice(0, 5)) assert.ok(!JSON.stringify(value).includes(secret), secret); }
 
 test("Correos de atención: contacto con referencia, rastreo solo al enviar y compatibilidad con plantillas anteriores", () => {
   const data = { template: 2, event: "paid", audience: "buyer", orderId: "OF-123456ABCDEF", from: env.EMAIL_FROM, to: customer.email,
@@ -71,7 +73,7 @@ test("Los nuevos correos conservan referencia, destinatario y cuerpo idénticos 
     const pendingBuyer = box.list(order.id).find((job) => job.audience === "buyer");
     assert.equal(pendingBuyer.state, "uncertain");
     const stored = JSON.parse(await readFile(path.join(folder, pendingBuyer.id + ".json"), "utf8"));
-    assert.equal(stored.data.template, 2);
+    assert.equal(stored.data.template, 3);
     assert.equal(stored.data.supportUrl, "https://shop.example.test/contacto.html?pedido=" + order.id);
     noSensitive(stored);
     await box.close(); timestamp += 61e3; failing = false;
@@ -156,9 +158,12 @@ test("Pedido único: propietario y comprador; transiciones confirmadas; API priv
       await app.email.drain();
     }
     assert.equal(app.calls.length, 6);
-    assert.match(app.calls[2].body.text, /3400.00 MXN/);
+    assert.match(app.calls[2].body.text, /Total exacto a transferir: \$3,400\.00 MXN/);
+    assert.match(app.calls[2].body.text, /CLABE: 000000000000000000/);
+    assert.match(app.calls[2].body.text, new RegExp("Concepto: OFFCODE " + created.data.id.replace("-", "")));
+    assert.equal(app.calls[2].body.to[0], customer.email);
     assert.match(app.calls[4].body.text, /SYNTHETIC-TRACKING-123/);
-    for (const c of app.calls) noSensitive(c.body);
+    for (const [index, c] of app.calls.entries()) index === 2 ? noPersonal(c.body) : noSensitive(c.body);
     const status = await app.call("/api/admin/email-notifications?orderId=" + created.data.id);
     assert.equal(status.cache, "no-store");
     assert.ok(status.data.notifications.every((j) => j.state === "accepted" && !j.canRetry));

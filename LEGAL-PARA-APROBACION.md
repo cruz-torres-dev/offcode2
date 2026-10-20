@@ -21,6 +21,12 @@ Las rutas `/aviso-de-privacidad.html` y `/condiciones-de-compra.html` están pre
 - Contacto por correo interceptado en pruebas; cookies de sesión y almacenamiento de pestaña realmente presentes; sin inventar analítica ni publicidad de terceros.
 - Conservación y solicitudes de derechos como obligaciones y procedimientos a aprobar, sin prometer un borrado automático inexistente.
 
+## Cambio pendiente de aprobación: sección 04 de Condiciones de compra
+
+La sección 04 de `/condiciones-de-compra.html` se actualizó para el flujo nuevo: al confirmar un pedido cotizado se muestran titular, banco, CLABE, total exacto y concepto; el comprador puede avisar con «Ya realicé la transferencia»; el aviso no confirma el pago y OFFCODE verifica el depósito en el banco. También se ajustó la última frase de la sección 02. El HTML lleva un comentario que la marca como pendiente.
+
+El propietario debe confirmar este texto antes de publicarlo como definitivo, además de decidir si habrá un plazo para transferir o para liberar prendas reservadas. Hoy no existe ese plazo y la página no lo promete.
+
 ## Integración existente y URLs para el panel
 
 El pie público y los enlaces base de checkout apuntan a las rutas locales nuevas. El controlador existente sigue respetando las URLs HTTPS que el propietario haya guardado; una URL configurada prevalece sobre el respaldo local. `app.js` y `checkout.js` conservan ese comportamiento.
