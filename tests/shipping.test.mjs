@@ -592,7 +592,7 @@ test("Configuración incompleta y tarifas de sandbox bloqueadas para ventas en p
   assert.throws(() => createEnvia({ enabled: true, token: "" }), /ENVIA_TOKEN/);
   assert.throws(
     () => createEnvia({ enabled: true, token: "fake", sender: {} }),
-    /ENVIA_ORIGIN_JSON/,
+    /configuración privada \(envia.sender\)/,
   );
   await assert.rejects(
     () =>

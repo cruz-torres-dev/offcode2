@@ -52,25 +52,25 @@ export function createEnvia(options = {}) {
   const fetcher = options.fetch ?? globalThis.fetch;
   if (enabled) {
     if (!token || /\s/.test(token)) throw Error("Falta ENVIA_TOKEN privado.");
-    if (
-      !sender ||
-      ![
-        "name",
-        "phone",
-        "email",
-        "street",
-        "number",
-        "district",
-        "city",
-        "state",
-        "postalCode",
-      ].every((k) => short(sender[k])) ||
-      !/^\d{5}$/.test(sender.postalCode) ||
-      !/^[A-Z]{2}$/.test(sender.state) ||
-      sender.country !== "MX"
-    )
+    const originIssues = [
+      "name",
+      "phone",
+      "email",
+      "street",
+      "number",
+      "district",
+      "city",
+      "state",
+      "postalCode",
+    ].filter((k) => !short(sender?.[k]));
+    if (short(sender?.postalCode) && !/^\d{5}$/.test(sender.postalCode))
+      originIssues.push("postalCode (5 dígitos)");
+    if (short(sender?.state) && !/^[A-Z]{2}$/.test(sender.state))
+      originIssues.push("state (2 letras mayúsculas del catálogo de Envia)");
+    if (sender?.country !== "MX") originIssues.push("country (MX)");
+    if (originIssues.length)
       throw Error(
-        "Completa ENVIA_ORIGIN_JSON con el domicilio real de origen en México y el código de estado de Envia.",
+        `Revisa el domicilio de origen en ${options.sender != null ? "la configuración privada (envia.sender)" : "ENVIA_ORIGIN_JSON"}: faltan campos o tienen formato incorrecto: ${originIssues.join(", ")}. Esto no comprueba cobertura ni tarifas.`,
       );
     if (
       !profiles ||
