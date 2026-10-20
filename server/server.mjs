@@ -494,6 +494,8 @@ export async function createApp(options = {}) {
           const data = await body(req);
           if (ordersLockedByEnv || !enabled)
             throw httpError(503, "Los pedidos todavía no están habilitados.");
+          if (data.paymentMethod !== undefined && data.paymentMethod !== "bank_transfer")
+            throw httpError(400, "El método de pago permitido es transferencia bancaria.");
           if (data.consent !== true)
             throw httpError(
               400,
@@ -526,6 +528,7 @@ export async function createApp(options = {}) {
               shippingCents: saved.shippingCents,
               totalCents: saved.totalCents,
               status: saved.status,
+              paymentMethod: saved.paymentMethod ?? "bank_transfer",
             });
           }
           if (!shipping.enabled && (data.shippingQuoteId || data.totalAccepted !== undefined || data.acceptedTotalCents !== undefined))
@@ -533,6 +536,8 @@ export async function createApp(options = {}) {
           const quote = shipping.enabled
             ? await chosenQuote(data.shippingQuoteId, customer, items)
             : null;
+          if (quote && data.paymentMethod !== "bank_transfer")
+            throw httpError(400, "Selecciona transferencia bancaria antes de enviar tu solicitud.");
           if (quote) requireAcceptedTotal(data,
             items.reduce((sum, item) => sum + item.qty * item.unitCents, 0) + quote.rate.shippingCents);
           limit(
@@ -555,6 +560,7 @@ export async function createApp(options = {}) {
             // are frozen here, so editing or archiving a product never rewrites
             // a past order.
             items,
+            paymentMethod: "bank_transfer",
             subtotalCents,
             shippingCents: quote?.rate.shippingCents ?? null,
             totalCents: quote ? subtotalCents + quote.rate.shippingCents : null,
@@ -610,7 +616,8 @@ export async function createApp(options = {}) {
               await exec.run("INSERT INTO customer_orders(order_id,customer_id) VALUES(?,?)", [id, shopper.id]);
           });
           if (duplicate) return send(res, 200, { id: duplicate.id, subtotalCents: duplicate.subtotalCents,
-            shippingCents: duplicate.shippingCents, totalCents: duplicate.totalCents, status: duplicate.status });
+            shippingCents: duplicate.shippingCents, totalCents: duplicate.totalCents, status: duplicate.status,
+            paymentMethod: duplicate.paymentMethod ?? "bank_transfer" });
           email.capture(order);
           return send(res, 201, {
             id,
@@ -618,6 +625,7 @@ export async function createApp(options = {}) {
             shippingCents: order.shippingCents,
             totalCents: order.totalCents,
             status: order.status,
+            paymentMethod: order.paymentMethod,
           });
         }
         if (route.startsWith("/api/admin/")) {
@@ -1286,6 +1294,14 @@ export async function createApp(options = {}) {
       }
       if (!["GET", "HEAD"].includes(req.method))
         throw httpError(405, "Método no permitido.");
+      // One canonical policy only. The retired standalone notice stays on disk
+      // as a historical artifact but is never served: it described a different
+      // platform and would contradict /privacidad.html. Temporary (302) until
+      // the owner approves the canonical text, so no browser caches it forever.
+      if (route === "/aviso-de-privacidad.html") {
+        res.writeHead(302, { Location: "/privacidad.html", "Cache-Control": "no-store" });
+        return res.end();
+      }
       let filename =
         route === "/"
           ? "index.html"

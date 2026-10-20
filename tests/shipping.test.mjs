@@ -203,6 +203,7 @@ async function createOrder(app) {
     consent: true,
     shippingQuoteId: rates.data.rates[0].id,
     totalAccepted: true,
+    paymentMethod: "bank_transfer",
     acceptedTotalCents: rates.data.rates[0].totalCents,
     shippingCents: 1,
   };
@@ -284,6 +285,7 @@ test("FedEx exclusivo: cotización ligada a datos, total del servidor, compra pr
       consent: true,
       shippingQuoteId: quotes.data.rates[0].id,
       totalAccepted: true,
+      paymentMethod: "bank_transfer",
       acceptedTotalCents: quotes.data.rates[0].totalCents,
     };
     assert.equal(

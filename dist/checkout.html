@@ -8,6 +8,8 @@
     <link rel="icon" href="assets/monogram-static.png" />
     <link rel="stylesheet" href="operations.css" />
     <link rel="stylesheet" href="checkout.css" />
+    <link rel="stylesheet" href="privacy.css" />
+    <script src="privacy.js" defer></script>
   </head>
   <body class="checkout-page">
     <header>
@@ -106,8 +108,8 @@
               >Acepto usar mis datos para gestionar mi pedido y su envío.</span
             ></label
           >
-          <p id="checkout-policies" class="fine" hidden>
-            <a id="privacy-link" href="aviso-de-privacidad.html" target="_blank" rel="noopener" hidden>Aviso de privacidad</a>
+          <p id="checkout-policies" class="fine">
+            <a id="privacy-link" href="privacidad.html" data-privacy-link>Política de privacidad</a>
             <a id="terms-link" href="condiciones-de-compra.html" target="_blank" rel="noopener" hidden>Condiciones de compra</a>
           </p>
           <fieldset id="shipping-section">
@@ -121,6 +123,14 @@
             </button>
             <p id="shipping-message" role="status"></p>
             <div id="shipping-rates" class="shipping-rates" role="radiogroup" aria-label="Servicios de FedEx"></div>
+          </fieldset>
+          <fieldset id="payment-section" hidden>
+            <legend><span class="step-number">04</span> Método de pago</legend>
+            <label class="payment-option">
+              <input id="payment-transfer" name="paymentMethod" type="radio" value="bank_transfer" checked required disabled />
+              <span class="payment-icon" aria-hidden="true">↗</span>
+              <span><strong>Transferencia bancaria</strong><span>Paga mediante transferencia bancaria después de que confirmemos la disponibilidad de tu pedido.</span><small>No se realiza ningún cobro al enviar la solicitud. El pago se verifica manualmente.</small></span>
+            </label>
           </fieldset>
           <section class="checkout-review" aria-labelledby="review-heading">
             <p class="eyebrow">REVISA ANTES DE CONTINUAR</p>
@@ -173,7 +183,7 @@
         <a class="edit-bag" href="index.html#cart">Editar mi bolsa ↗</a>
       </aside>
     </main>
-    <footer>OFFCODE™ · Transferencias verificadas manualmente</footer>
+    <footer>OFFCODE™ · Transferencias verificadas manualmente · <a href="privacidad.html" data-privacy-link>Política de privacidad</a></footer>
     <script src="checkout.js" defer></script>
     <script type="module" src="checkout-address.js"></script>
   </body>

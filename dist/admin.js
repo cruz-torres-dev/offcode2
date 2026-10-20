@@ -375,9 +375,13 @@ function render() {
     if (o.customer.notes)
       card.append(text("p", "Referencias: " + o.customer.notes));
     card.append(
-      text("p", o.items.map((p) => `Talla ${p.size} × ${p.qty}`).join(" / ")),
+      text("p", o.items.map((p) => `${p.name || "Producto OFFCODE"} · Talla ${p.size} × ${p.qty}`).join(" / ")),
       text("p", "Prendas: " + money(o.subtotalCents)),
+      text("p", "Método de pago: " + (!o.paymentMethod || o.paymentMethod === "bank_transfer" ? "Transferencia bancaria" : "Método no reconocido: revisar")),
+      text("p", "Pago: " + (["paid", "shipped", "delivered"].includes(o.status) ? "Verificado manualmente" : o.status === "cancelled" ? "Pedido cancelado" : o.status === "requested" ? "Pendiente de confirmar disponibilidad" : "Pendiente de verificación bancaria")),
     );
+    if (o.shipping) card.append(text("p", "Servicio seleccionado: " + (o.shipping.description || "FedEx")));
+    if (o.totalAcceptance) card.append(text("p", "Total aceptado por el comprador: " + money(o.totalAcceptance.totalCents), "fine"));
     card.append(
       text(
         "p",

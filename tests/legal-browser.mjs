@@ -38,7 +38,7 @@ for (const width of [320, 360, 390, 430, 1280]) {
   test(`Legales ${width}px: enlaces desde tienda, lectura, menú, regreso y acceso directo`, async () => {
     const { context, page } = await fixture(width);
     try {
-      for (const [route, title, id] of [["aviso-de-privacidad.html", "Aviso de privacidad", "footer-privacy"], ["condiciones-de-compra.html", "Condiciones de compra", "footer-terms"]]) {
+      for (const [route, title, id] of [["condiciones-de-compra.html", "Condiciones de compra", "footer-terms"]]) {
         await page.goto(origin); await page.locator("#" + id).scrollIntoViewIfNeeded();
         assert.equal(await page.locator("#" + id).isVisible(), true);
         await page.locator("#" + id).click(); await page.waitForURL("**/" + route);
@@ -66,14 +66,16 @@ for (const width of [320, 360, 390, 430, 1280]) {
   });
 }
 
-test("Las dos páginas se pueden leer y navegar sin JavaScript", async () => {
+test("Condiciones se leen sin JavaScript y enlazan a la política canónica", async () => {
   const { context, page } = await fixture(320, false);
   try {
-    await page.goto(origin + "/aviso-de-privacidad.html");
-    await page.locator('.footer-links a[href="condiciones-de-compra.html"]').click();
+    await page.goto(origin + "/condiciones-de-compra.html");
     assert.equal(await page.locator(".legal-title").textContent(), "Condiciones de compra");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 320);
-    await page.locator(".legal-return").click(); await page.waitForURL("**/index.html");
+    await page.locator('.footer-links a[href="privacidad.html"]').click();
+    await page.waitForURL("**/privacidad.html");
+    assert.match(await page.locator("h1").first().textContent(), /Política de privacidad/);
+    await page.goto(origin);
   } finally { await context.close(); }
 });
 
@@ -83,18 +85,18 @@ test("Panel privado: el formulario real guarda las URLs HTTPS y mantiene recepci
     await page.goto(origin + "/settings.html");
     await page.locator("#password").fill(password); await page.locator("#login-form button").click();
     await page.locator("#settings-panel").waitFor();
-    await page.locator('[name="privacyUrl"]').fill("https://offcode.mx/aviso-de-privacidad.html");
+    await page.locator('[name="privacyUrl"]').fill("https://offcode.mx/privacidad.html");
     await page.locator('[name="termsUrl"]').fill("https://offcode.mx/condiciones-de-compra.html");
     await page.locator('#settings-form [name="currentPassword"]').fill(password);
     const saved = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/admin/settings" && r.request().method() === "PATCH");
     await page.locator('#save-settings').click(); assert.equal((await saved).status(), 200);
     await page.reload(); await page.locator("#settings-panel").waitFor();
-    assert.equal(await page.locator('[name="privacyUrl"]').inputValue(), "https://offcode.mx/aviso-de-privacidad.html");
+    assert.equal(await page.locator('[name="privacyUrl"]').inputValue(), "https://offcode.mx/privacidad.html");
     assert.equal(await page.locator('[name="termsUrl"]').inputValue(), "https://offcode.mx/condiciones-de-compra.html");
     const config = await (await context.request.get(origin + "/api/config")).json();
-    assert.equal(config.enabled, false); assert.equal(config.privacyUrl, "https://offcode.mx/aviso-de-privacidad.html");
+    assert.equal(config.enabled, false); assert.equal(config.privacyUrl, "https://offcode.mx/privacidad.html");
     // Existing configured HTTPS links still override the store's static fallback.
-    await page.goto(origin); await page.waitForFunction(() => document.querySelector("#footer-privacy").getAttribute("href") === "https://offcode.mx/aviso-de-privacidad.html");
+    await page.goto(origin); await page.waitForFunction(() => document.querySelector("#footer-privacy").getAttribute("href") === "https://offcode.mx/privacidad.html");
     assert.equal(await page.locator("#footer-terms").getAttribute("href"), "https://offcode.mx/condiciones-de-compra.html");
   } finally { await context.close(); }
 });

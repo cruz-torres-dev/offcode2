@@ -186,7 +186,7 @@ test("Activar pedidos y FedEx sin URLs legales permite cotizar y guardar una sol
     assert.equal(quoted.data.rates[0].shippingCents, 18520);
     assert.deepEqual(calls.map((call) => call.url), ["https://queries.envia.com/state?country_code=MX", "https://api.envia.com/ship/rate/"]);
     const request = { requestKey: randomUUID(), items, customer, consent: true, shippingQuoteId: quoted.data.rates[0].id,
-      totalAccepted: true, acceptedTotalCents: quoted.data.rates[0].totalCents };
+      totalAccepted: true, acceptedTotalCents: quoted.data.rates[0].totalCents, paymentMethod: "bank_transfer" };
     assert.equal((await app.call("/api/orders", { ...request, consent: false })).status, 400);
     assert.equal((await app.db.get("SELECT COUNT(*) AS n FROM orders")).n, 0);
     const created = await app.call("/api/orders", request);

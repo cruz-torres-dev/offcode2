@@ -149,6 +149,10 @@ test("Checkout visible: dos servicios actualizan el total del servidor y exigen 
     page.nodes.get("#accept-total").checked = true; page.nodes.get("#accept-total").onchange();
     assert.equal(page.nodes.get("#submit-order").disabled, false);
     radios[1].onchange();
+    assert.equal(page.nodes.get("#shipping-rates").children.length, 0);
+    assert.equal(page.nodes.get("#accept-total").checked, false);
+    await page.nodes.get("#quote-shipping").onclick();
+    page.nodes.get("#shipping-rates").children[1].children[0].onchange();
     assert.match(page.nodes.get("#review-total").textContent, /1,910\.00/);
     assert.equal(page.nodes.get("#accept-total").checked, false);
     assert.equal(page.nodes.get("#submit-order").disabled, true);
@@ -208,6 +212,7 @@ test("Checkout visible: un rechazo al enviar exige cotizar y aceptar de nuevo si
     assert.equal(sent.requestKey, key);
     assert.equal(sent.shippingQuoteId, quoted.rates[0].id);
     assert.equal(sent.totalAccepted, true);
+    assert.equal(sent.paymentMethod, "bank_transfer");
     assert.equal(sent.acceptedTotalCents, quoted.rates[0].totalCents);
     assert.equal(page.nodes.get("#shipping-rates").children.length, 0);
     assert.equal(page.nodes.get("#accept-total").checked, false);

@@ -20,6 +20,7 @@ export async function checkoutDom(config, { bag = [{ size: "M", qty: 1 }], fetch
     return ["#" + id, node];
   }));
   const fields = Object.fromEntries(["name", "phone", "email", "street", "neighborhood", "postalCode", "city", "state", "notes", "consent"].map((name) => [name, Object.assign(new Element("input"), { name })]));
+  Object.assign(nodes.get("#payment-transfer"), { checked: true, value: "bank_transfer" });
   nodes.get("#order-form").elements = { namedItem: (name) => fields[name] };
   nodes.get("#state-text").replaceWith = (node) => { fields.state = node; };
   const storage = new Map([["offcode-bag", JSON.stringify(bag)]]), requests = [], timers = new Map();

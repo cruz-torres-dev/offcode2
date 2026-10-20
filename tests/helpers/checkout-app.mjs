@@ -44,8 +44,18 @@ export async function checkoutApp({ shippingEnabled = true, ordersEnabled = true
     return { status: response.status, data: await response.json() };
   };
   const quote = (items = bag, destination = customer) => call("/api/shipping/rates", { items, customer: destination, consent: true });
+  let ownerCookie;
+  const ownerCall = async (route, data, method = data === undefined ? "GET" : "POST") => {
+    if (!ownerCookie) {
+      const login = await fetch(origin + "/api/session", { method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+      if (!login.ok) throw Error("Synthetic owner login failed");
+      ownerCookie = login.headers.get("set-cookie").split(";")[0];
+    }
+    const response = await fetch(origin + route, { method, headers: { Origin: origin, Cookie: ownerCookie, "Content-Type": "application/json" }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
+    return { status: response.status, data: await response.json() };
+  };
   const request = (rate, extra = {}) => ({ requestKey: randomUUID(), customer, items: bag, consent: true,
-    shippingQuoteId: rate.id, totalAccepted: true, acceptedTotalCents: rate.totalCents, ...extra });
+    shippingQuoteId: rate.id, totalAccepted: true, acceptedTotalCents: rate.totalCents, paymentMethod: "bank_transfer", ...extra });
   const snapshot = async () => Object.fromEntries(await Promise.all(["orders", "order_reservations", "inventory", "inventory_movements", "shipping_jobs"].map(async (table) => [table, await app.db.all(`SELECT * FROM ${table}`)])));
-  return { ...app, origin, call, quote, request, snapshot, provider };
+  return { ...app, origin, call, ownerCall, quote, request, snapshot, provider };
 }

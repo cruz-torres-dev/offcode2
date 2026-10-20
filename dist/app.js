@@ -252,7 +252,6 @@ fetch("/api/config")
     if (!response.ok) return;
     const config = await response.json();
     for (const [id, value] of [
-      ["footer-privacy", config.privacyUrl],
       ["footer-terms", config.termsUrl],
     ]) {
       if (!value) continue;

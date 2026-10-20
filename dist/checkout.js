@@ -2,6 +2,7 @@ const $ = (selector) => document.querySelector(selector);
 const money = (cents) => new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(cents / 100);
 const form = $("#order-form");
 const acceptance = $("#accept-total");
+const transfer = $("#payment-transfer");
 const customerFields = ["name", "phone", "email", "street", "neighborhood", "postalCode", "city", "state", "notes"];
 let items = [], config, key, selectedRate = null, quoteRevision = 0, expiryTimer, orderReference = "", submitting = false;
 try {
@@ -40,12 +41,13 @@ function totals(subtotalCents, shippingCents, totalCents) {
 }
 function updateSubmit() {
   $("#submit-order").disabled = submitting || !config?.enabled || !config?.shipping?.enabled || !selectedRate ||
-    !acceptance.checked || Date.parse(selectedRate.expiresAt) <= Date.now();
+    !acceptance.checked || !transfer.checked || Date.parse(selectedRate.expiresAt) <= Date.now();
 }
 function clearRates(message = "Completa tu dirección y pulsa Calcular envío.") {
   quoteRevision++;
   clearTimeout(expiryTimer);
   selectedRate = null;
+  $("#payment-section").hidden = true; transfer.disabled = true;
   acceptance.checked = false; acceptance.disabled = true;
   $("#accept-total-label").textContent = "Elige un servicio para revisar y aceptar el total completo.";
   $("#shipping-rates").replaceChildren();
@@ -108,12 +110,16 @@ function renderItems(resolved = []) {
   });
 }
 function selectRate(rate, snapshot) {
+  if (selectedRate && selectedRate.id !== rate.id) {
+    clearRates("Cambiaste el servicio. Vuelve a calcular el envío, elige la nueva tarifa y acepta el total."); return;
+  }
   if (snapshot !== customerFingerprint()) { clearRates("Tus datos cambiaron. Vuelve a calcular el envío."); return; }
   if (!Number.isSafeInteger(rate.totalCents) || !Number.isSafeInteger(rate.subtotalCents) || !Number.isSafeInteger(rate.shippingCents) ||
       rate.currency !== "MXN" || !Number.isFinite(Date.parse(rate.expiresAt)) || Date.parse(rate.expiresAt) <= Date.now()) {
     clearRates("La cotización no está vigente. Vuelve a calcular el envío."); return;
   }
   selectedRate = rate;
+  $("#payment-section").hidden = false; transfer.disabled = false; transfer.checked = true;
   totals(rate.subtotalCents, rate.shippingCents, rate.totalCents);
   $("#summary-service").textContent = rate.description;
   $("#shipping-summary").textContent = "Cotización vigente hasta " + new Date(rate.expiresAt).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }) + ".";
@@ -140,7 +146,7 @@ async function init() {
   saveBag(); renderItems(); totals(previewSubtotal(), null, null);
   if (!config.enabled) { $("#availability").textContent = "La recepción de pedidos está cerrada temporalmente."; return; }
   form.hidden = false;
-  for (const [id, value] of [["privacy-link", config.privacyUrl], ["terms-link", config.termsUrl]]) {
+  for (const [id, value] of [["terms-link", config.termsUrl]]) {
     if (!value) continue;
     try { const url = new URL(value); if (url.protocol !== "https:" || url.username || url.password) continue;
       $("#" + id).href = url.href; $("#" + id).hidden = false; $("#checkout-policies").hidden = false;
@@ -169,6 +175,7 @@ for (const event of ["input", "change"]) form.addEventListener(event, (e) => {
     clearRates("Tus datos cambiaron. Vuelve a calcular el envío para esta dirección.");
 });
 acceptance.onchange = updateSubmit;
+transfer.onchange = updateSubmit;
 $("#quote-shipping").onclick = async () => {
   if (submitting || !config?.enabled || !config.shipping?.enabled) return;
   for (const name of [...customerFields, "consent"]) {
@@ -204,7 +211,7 @@ form.addEventListener("submit", async (e) => {
   e.preventDefault();
   if (submitting || !config?.enabled || !config.shipping?.enabled) return;
   if (!selectedRate || Date.parse(selectedRate.expiresAt) <= Date.now()) { clearRates("La tarifa venció. Vuelve a calcular el envío."); return; }
-  if (!acceptance.checked || !form.reportValidity()) return;
+  if (!acceptance.checked || !transfer.checked || !form.reportValidity()) return;
   submitting = true; updateSubmit();
   const button = $("#submit-order"), accepted = selectedRate;
   const controls = [...document.querySelectorAll("#order-form input, #order-form select, #quote-shipping, .summary-editors input, .summary-editors select")];
@@ -215,6 +222,7 @@ form.addEventListener("submit", async (e) => {
     const response = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       requestKey: key, customer: customer(), items, consent: form.elements.namedItem("consent").checked,
       shippingQuoteId: accepted.id, totalAccepted: true, acceptedTotalCents: accepted.totalCents,
+      paymentMethod: transfer.value,
     }) });
     const result = await response.json();
     if (!response.ok) { if (response.status === 409) clearRates("La cotización o la selección cambió. Calcula de nuevo y vuelve a aceptar el total."); throw Error(result.error || "No se pudo guardar tu solicitud."); }
@@ -232,7 +240,7 @@ form.addEventListener("submit", async (e) => {
   } catch (error) { $("#availability").textContent = error.message + " Tu selección sigue disponible para reintentar."; }
   finally {
     if (!orderReference) controls.forEach((control, index) => { control.disabled = disabledBefore[index]; });
-    if (!selectedRate) acceptance.disabled = true;
+    if (!selectedRate) { acceptance.disabled = true; transfer.disabled = true; }
     submitting = false; button.textContent = "Enviar solicitud de pedido →"; updateSubmit();
   }
 });

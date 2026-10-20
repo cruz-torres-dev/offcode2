@@ -5,7 +5,7 @@ import { checkoutDom } from "./helpers/checkout-dom.mjs";
 import { createApp } from "../server/server.mjs";
 
 const origin = "https://offcode.mx", password = "synthetic-legal-review-password";
-const privacy = origin + "/aviso-de-privacidad.html", terms = origin + "/condiciones-de-compra.html";
+const privacy = origin + "/privacidad.html", terms = origin + "/condiciones-de-compra.html";
 async function start() {
   const app = await createApp({ origin, production: false, enabled: false, ordersEnabledEnv: "false", databasePath: ":memory:",
     password, settingsKey: "ab".repeat(32), privacyUrl: "", termsUrl: "", whatsapp: "",
@@ -23,21 +23,33 @@ async function start() {
   return { ...app, base, call };
 }
 
-test("Páginas legales: rutas públicas permanentes, encabezado compartido y estado de revisión explícito", async () => {
+test("Páginas legales: condiciones públicas y aviso antiguo retirado hacia la política canónica", async () => {
   const app = await start();
   try {
-    for (const [route, heading] of [["aviso-de-privacidad.html", "Aviso de privacidad"], ["condiciones-de-compra.html", "Condiciones de compra"]]) {
-      const response = await fetch(app.base + "/" + route);
-      assert.equal(response.status, 200); assert.match(response.headers.get("content-type"), /^text\/html/);
-      const html = await response.text();
-      assert.ok(html.includes(`<h1 class="legal-title">${heading}</h1>`));
-      assert.match(html, /Versión para revisión del propietario/);
-      assert.match(html, /name="robots" content="noindex,nofollow"/);
-      assert.doesNotMatch(html, /\[PENDIENTE\]|\[RFC\]|\[DOMICILIO\]|\[CORREO\]/i);
-      for (const id of ["menu-toggle", "main-nav", "account-toggle", "account-dialog", "contenido"]) assert.ok(html.includes(`id="${id}"`));
-      assert.match(html, /href="index\.html">← Volver a la tienda/);
-      assert.equal((await fetch(app.base + "/" + route, { method: "HEAD" })).status, 200);
-    }
+    const termsPage = await fetch(app.base + "/condiciones-de-compra.html");
+    assert.equal(termsPage.status, 200); assert.match(termsPage.headers.get("content-type"), /^text\/html/);
+    const html = await termsPage.text();
+    assert.ok(html.includes('<h1 class="legal-title">Condiciones de compra</h1>'));
+    assert.match(html, /Versión para revisión del propietario/);
+    assert.match(html, /name="robots" content="noindex,nofollow"/);
+    assert.doesNotMatch(html, /\[PENDIENTE\]|\[RFC\]|\[DOMICILIO\]|\[CORREO\]/i);
+    for (const id of ["menu-toggle", "main-nav", "account-toggle", "account-dialog", "contenido"]) assert.ok(html.includes(`id="${id}"`));
+    assert.match(html, /href="index\.html">← Volver a la tienda/);
+    assert.match(html, /href="privacidad\.html"/);
+    assert.doesNotMatch(html, /aviso-de-privacidad\.html/);
+    assert.equal((await fetch(app.base + "/condiciones-de-compra.html", { method: "HEAD" })).status, 200);
+
+    // The retired notice no longer serves a second policy: it redirects.
+    const legacy = await fetch(app.base + "/aviso-de-privacidad.html", { redirect: "manual" });
+    assert.equal(legacy.status, 302);
+    assert.equal(legacy.headers.get("location"), "/privacidad.html");
+    assert.equal(legacy.headers.get("cache-control"), "no-store");
+    const followed = await fetch(app.base + "/aviso-de-privacidad.html");
+    assert.equal(followed.status, 200);
+    const body = await followed.text();
+    assert.equal(body, await readFile(new URL("../dist/privacidad.html", import.meta.url), "utf8"));
+    assert.doesNotMatch(body, /<h1 class="legal-title">Aviso de privacidad/);
+
     const style = await fetch(app.base + "/legal.css"); assert.equal(style.status, 200);
     assert.match(style.headers.get("content-type"), /^text\/css/);
   } finally { await app.close(); }
@@ -50,7 +62,7 @@ test("Pie: conserva enlaces locales legibles sin URLs del propietario configurad
     assert.equal(config.enabled, false); assert.equal(config.privacyUrl, ""); assert.equal(config.termsUrl, "");
     for (const [page, ids] of [["index.html", ["footer-privacy", "footer-terms"]]]) {
       const html = await (await fetch(app.base + "/" + page)).text();
-      for (const [index, route] of ["aviso-de-privacidad.html", "condiciones-de-compra.html"].entries()) {
+      for (const [index, route] of ["privacidad.html", "condiciones-de-compra.html"].entries()) {
         const tag = html.match(new RegExp(`<a\\b[^>]*id="${ids[index]}"[^>]*>`))?.[0];
         assert.ok(tag?.includes(`href="${route}"`)); assert.doesNotMatch(tag, /\bhidden\b/);
         assert.equal((await fetch(new URL(route, app.base + "/" + page))).status, 200);
@@ -73,12 +85,14 @@ test("Checkout: abre el formulario con consentimiento de uso de datos y muestra 
     const { nodes } = await checkoutDom({ enabled: true, unitCents: 165000,
       product: { saleSizes: ["M"] }, shipping: { enabled: false }, ...urls });
     assert.equal(nodes.get("#order-form").hidden, false, "las URLs vacías no impiden abrir el formulario");
-    for (const [id, url, fallback] of [["#privacy-link", urls.privacyUrl, "aviso-de-privacidad.html"], ["#terms-link", urls.termsUrl, "condiciones-de-compra.html"]]) {
+    assert.equal(nodes.get("#privacy-link").href, "privacidad.html");
+    assert.equal(nodes.get("#privacy-link").hidden, false);
+    for (const [id, url, fallback] of [["#terms-link", urls.termsUrl, "condiciones-de-compra.html"]]) {
       const link = nodes.get(id);
       assert.equal(link.hidden, !url);
       assert.equal(link.href, url || fallback, "nunca se crea un enlace al checkout actual mediante href vacío");
     }
-    assert.equal(nodes.get("#checkout-policies").hidden, !urls.privacyUrl && !urls.termsUrl);
+    assert.equal(nodes.get("#checkout-policies").hidden, false);
   }
 });
 
