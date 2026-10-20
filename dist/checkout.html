@@ -7,26 +7,27 @@
     <title>Solicitar pedido — OFFCODE</title>
     <link rel="icon" href="assets/monogram-static.png" />
     <link rel="stylesheet" href="operations.css" />
+    <link rel="stylesheet" href="checkout.css" />
   </head>
-  <body>
+  <body class="checkout-page">
     <header>
       <a class="wordmark" href="index.html">OFFCODE™</a
-      ><a href="index.html#collection">← Volver a la colección</a>
+      ><a href="index.html#collection">← Volver a la bolsa</a>
     </header>
     <main class="checkout-layout">
-      <section>
-        <p class="eyebrow">LA AFRO × OFFCODE / PEDIDOS</p>
-        <h1>Tu próximo código.</h1>
+      <section class="checkout-content">
+        <p class="eyebrow">COLECCIÓN / DATOS / ENVÍO</p>
+        <h1>Completa tu solicitud.</h1>
         <p class="intro">
-          Solicita disponibilidad y envío. Confirmaremos el total antes de que
-          hagas la transferencia.
+          Elige tu envío y revisa el total. OFFCODE confirmará disponibilidad
+          antes de solicitarte la transferencia.
         </p>
         <p id="availability" class="message" role="status">
           Comprobando recepción de pedidos…
         </p>
         <form id="order-form" hidden>
           <fieldset>
-            <legend>Contacto</legend>
+            <legend><span class="step-number">01</span> Contacto</legend>
             <div class="form-grid">
               <label
                 >Nombre completo<input
@@ -56,7 +57,8 @@
             </div>
           </fieldset>
           <fieldset>
-            <legend>Dirección de entrega en México</legend>
+            <legend><span class="step-number">02</span> Dirección de entrega</legend>
+            <p class="country-note">País / Región <strong>México</strong></p>
             <div class="form-grid">
               <label class="full"
                 >Calle y número (incluye interior, si aplica)<input
@@ -108,20 +110,29 @@
             <a id="privacy-link" href="aviso-de-privacidad.html" target="_blank" rel="noopener" hidden>Aviso de privacidad</a>
             <a id="terms-link" href="condiciones-de-compra.html" target="_blank" rel="noopener" hidden>Condiciones de compra</a>
           </p>
-          <fieldset id="shipping-section" hidden>
-            <legend>Envío por FedEx</legend>
+          <fieldset id="shipping-section">
+            <legend><span class="step-number">03</span> Métodos de envío</legend>
             <p class="fine">
-              Al cotizar compartiremos los datos de entrega con Envia para
-              consultar servicios de FedEx. El tiempo mostrado es una estimación
-              de la paquetería.
+              Completa tu dirección para consultar los servicios de FedEx.
+              Al calcular, compartiremos tus datos de entrega con Envia.
             </p>
             <button type="button" id="quote-shipping">
-              Consultar envío FedEx
+              Calcular envío
             </button>
             <p id="shipping-message" role="status"></p>
-            <div id="shipping-rates" class="shipping-rates"></div>
+            <div id="shipping-rates" class="shipping-rates" role="radiogroup" aria-label="Servicios de FedEx"></div>
           </fieldset>
-          <button class="primary" id="submit-order">Solicitar pedido →</button>
+          <section class="checkout-review" aria-labelledby="review-heading">
+            <p class="eyebrow">REVISA ANTES DE CONTINUAR</p>
+            <h2 id="review-heading">Tu total, sin sorpresas.</h2>
+            <dl class="review-totals" aria-live="polite" aria-atomic="true">
+              <div><dt>Subtotal</dt><dd id="review-subtotal">—</dd></div>
+              <div><dt>Envío</dt><dd id="review-shipping">Por calcular</dd></div>
+              <div class="review-grand-total"><dt>Total <small>MXN</small></dt><dd id="review-total">Por calcular</dd></div>
+            </dl>
+            <label class="check total-acceptance"><input id="accept-total" name="totalAcceptance" type="checkbox" required disabled /><span id="accept-total-label">Elige un servicio para revisar y aceptar el total completo.</span></label>
+            <button class="primary" id="submit-order" disabled>Enviar solicitud de pedido →</button>
+          </section>
           <p class="fine">
             Confirmaremos disponibilidad antes de compartir los datos bancarios.
             Enviar esta solicitud no confirma inventario ni realiza un cobro.
@@ -133,9 +144,10 @@
           <button id="copy-order-reference" type="button">Copiar referencia</button>
           <p id="order-copy-status" class="fine" role="status"></p>
           <p>
-            Guarda esta referencia. Confirmaremos disponibilidad y costo de
-            envío antes de compartir el total y los datos para transferir. No
-            transfieras todavía.
+            Guarda esta referencia y el total de tu solicitud. Confirmaremos
+            disponibilidad antes de compartir los datos para transferir.
+            Si hace falta actualizar el envío, te pediremos revisar el nuevo
+            total antes de pagar. No transfieras todavía.
           </p>
           <a id="whatsapp-order" class="primary" target="_blank" rel="noopener"
             >Continuar por WhatsApp ↗</a
@@ -147,22 +159,18 @@
           </p>
         </section>
       </section>
-      <aside>
-        <p class="eyebrow">TU SELECCIÓN</p>
-        <h2>LA AFRO × OFFCODE</h2>
-        <img
-          class="product"
-          src="assets/product-front.jpg"
-          alt="Sudadera LA AFRO × OFFCODE"
-          width="1080"
-          height="1080"
-        />
-        <div id="order-items"></div>
-        <p class="total" id="order-subtotal"></p>
-        <p id="shipping-summary" class="fine">
-          Envío por confirmar. El total final se acuerda antes de transferir.
-        </p>
-        <a href="index.html#collection">Editar selección ↗</a>
+      <aside class="checkout-sidebar" aria-labelledby="summary-heading">
+        <div class="summary-heading"><p class="eyebrow">TU SELECCIÓN</p><span>OFFCODE™</span></div>
+        <h2 id="summary-heading">Resumen del pedido</h2>
+        <div id="order-items" class="summary-items"></div>
+        <dl class="summary-totals" aria-live="polite" aria-atomic="true">
+          <div><dt>Subtotal</dt><dd id="order-subtotal">—</dd></div>
+          <div><dt>Envío <span id="summary-service"></span></dt><dd id="summary-shipping">Por calcular</dd></div>
+          <div class="summary-grand-total"><dt>Total</dt><dd><small>MXN</small> <span id="summary-total">Por calcular</span></dd></div>
+        </dl>
+        <p id="shipping-summary" class="fine">Completa tu dirección y calcula el envío para conocer el total.</p>
+        <div class="summary-payment"><span aria-hidden="true">↗</span><div><strong>Pago por transferencia</strong><p>Esta es una solicitud. No se realiza ningún cobro al enviarla.</p></div></div>
+        <a class="edit-bag" href="index.html#cart">Editar mi bolsa ↗</a>
       </aside>
     </main>
     <footer>OFFCODE™ · Transferencias verificadas manualmente</footer>

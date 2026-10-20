@@ -202,6 +202,8 @@ async function createOrder(app) {
     items,
     consent: true,
     shippingQuoteId: rates.data.rates[0].id,
+    totalAccepted: true,
+    acceptedTotalCents: rates.data.rates[0].totalCents,
     shippingCents: 1,
   };
   const created = await app.call("/api/orders", "POST", request);
@@ -281,6 +283,8 @@ test("FedEx exclusivo: cotización ligada a datos, total del servidor, compra pr
       customer,
       consent: true,
       shippingQuoteId: quotes.data.rates[0].id,
+      totalAccepted: true,
+      acceptedTotalCents: quotes.data.rates[0].totalCents,
     };
     assert.equal(
       (

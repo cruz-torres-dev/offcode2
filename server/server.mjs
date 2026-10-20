@@ -310,19 +310,22 @@ export async function createApp(options = {}) {
         id,
         ...rate,
         carrier: "FedEx",
+        subtotalCents: items.reduce((sum, item) => sum + item.qty * item.unitCents, 0),
+        totalCents: items.reduce((sum, item) => sum + item.qty * item.unitCents, 0) + rate.shippingCents,
+        currency: "MXN",
         expiresAt: new Date(expires).toISOString(),
       });
     }
     return quotes;
   }
-  async function chosenQuote(id, customer, items, orderId = null) {
+  async function chosenQuote(id, customer, items, orderId = null, exec = db) {
     const row =
       typeof id === "string"
-        ? await db.get("SELECT * FROM shipping_quotes WHERE id=?", [id])
+        ? await exec.get("SELECT * FROM shipping_quotes WHERE id=?", [id])
         : null;
     if (
       !row ||
-      row.expires < Date.now() ||
+      row.expires <= Date.now() ||
       row.order_id !== orderId ||
       row.fingerprint !== fingerprint(customer, items)
     )
@@ -336,6 +339,12 @@ export async function createApp(options = {}) {
     if (quote.environment !== shipping.environment)
       throw httpError(409, "Vuelve a cotizar en el entorno actual.");
     return quote;
+  }
+  function requireAcceptedTotal(data, totalCents) {
+    if (data.totalAccepted !== true)
+      throw httpError(400, "Revisa y acepta el total completo antes de enviar tu solicitud.");
+    if (!Number.isSafeInteger(data.acceptedTotalCents) || data.acceptedTotalCents !== totalCents)
+      throw httpError(409, "El total cambió. Vuelve a calcular el envío y acepta el total actualizado.");
   }
   const auth = (req) => {
     const token = req.headers.cookie
@@ -412,11 +421,10 @@ export async function createApp(options = {}) {
               400,
               "Acepta el uso de tus datos para gestionar el pedido y el envío antes de cotizar.",
             );
+          const items = await catalog.resolveItems(data.items);
           return send(res, 200, {
-            rates: await quoteShipping(
-              validateCustomer(data.customer),
-              await catalog.resolveItems(data.items),
-            ),
+            rates: await quoteShipping(validateCustomer(data.customer), items),
+            items,
           });
         }
         if (route === "/api/waitlist" && req.method === "POST") {
@@ -511,15 +519,22 @@ export async function createApp(options = {}) {
                 409,
                 "Ya existe una solicitud con esta referencia y otros datos. Contacta a OFFCODE para corregirla antes de enviar otra.",
               );
+            if (saved.shipping) requireAcceptedTotal(data, saved.totalCents);
             return send(res, 200, {
               id: saved.id,
               subtotalCents: saved.subtotalCents,
+              shippingCents: saved.shippingCents,
+              totalCents: saved.totalCents,
               status: saved.status,
             });
           }
+          if (!shipping.enabled && (data.shippingQuoteId || data.totalAccepted !== undefined || data.acceptedTotalCents !== undefined))
+            throw httpError(409, "La cotización de envíos ya no está habilitada. Consulta con OFFCODE antes de continuar.");
           const quote = shipping.enabled
             ? await chosenQuote(data.shippingQuoteId, customer, items)
             : null;
+          if (quote) requireAcceptedTotal(data,
+            items.reduce((sum, item) => sum + item.qty * item.unitCents, 0) + quote.rate.shippingCents);
           limit(
             "customer:" +
               createHash("sha256")
@@ -561,6 +576,8 @@ export async function createApp(options = {}) {
             tracking: "",
             history: [{ at: now, status: "requested" }],
             consent: { at: now, privacyUrl, termsUrl },
+            ...(quote ? { totalAcceptance: { at: now, quoteId: data.shippingQuoteId,
+              totalCents: subtotalCents + quote.rate.shippingCents, currency: "MXN" } } : {}),
           };
           const shopper = await accounts.current(req);
           // Order row and stock reservation commit together or not at all.
@@ -571,7 +588,18 @@ export async function createApp(options = {}) {
               const saved = JSON.parse(existing.payload);
               if (JSON.stringify(saved.customer) !== JSON.stringify(customer) || JSON.stringify(saved.items) !== JSON.stringify(items))
                 throw httpError(409, "Ya existe una solicitud con esta referencia y otros datos.");
+              if (saved.shipping) requireAcceptedTotal(data, saved.totalCents);
               return saved;
+            }
+            if (quote) {
+              // Recheck after waiting for the transaction: expiry, configuration
+              // or catalog edits must not silently change an accepted total.
+              await chosenQuote(data.shippingQuoteId, customer, items, null, exec);
+              for (const item of items) {
+                const current = await exec.get("SELECT p.price_cents,p.status AS product_status,v.status FROM variants v JOIN products p ON p.id=v.product_id WHERE v.id=?", [item.variantId]);
+                if (!current || current.price_cents !== item.unitCents || current.product_status !== "published" || current.status !== "active")
+                  throw httpError(409, "El producto cambió. Actualiza tu selección y vuelve a calcular el envío.");
+              }
             }
             await exec.run(
               "INSERT INTO orders(id,request_key,created_at,payload) VALUES(?,?,?,?)",
@@ -581,11 +609,14 @@ export async function createApp(options = {}) {
             if (shopper?.verified_at && customer.email.trim().toLowerCase() === shopper.email)
               await exec.run("INSERT INTO customer_orders(order_id,customer_id) VALUES(?,?)", [id, shopper.id]);
           });
-          if (duplicate) return send(res, 200, { id: duplicate.id, subtotalCents: duplicate.subtotalCents, status: duplicate.status });
+          if (duplicate) return send(res, 200, { id: duplicate.id, subtotalCents: duplicate.subtotalCents,
+            shippingCents: duplicate.shippingCents, totalCents: duplicate.totalCents, status: duplicate.status });
           email.capture(order);
           return send(res, 201, {
             id,
             subtotalCents: order.subtotalCents,
+            shippingCents: order.shippingCents,
+            totalCents: order.totalCents,
             status: order.status,
           });
         }

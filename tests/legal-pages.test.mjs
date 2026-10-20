@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import vm from "node:vm";
+import { checkoutDom } from "./helpers/checkout-dom.mjs";
 import { createApp } from "../server/server.mjs";
 
 const origin = "https://offcode.mx", password = "synthetic-legal-review-password";
@@ -61,7 +61,6 @@ test("Pie: conserva enlaces locales legibles sin URLs del propietario configurad
 
 test("Checkout: abre el formulario con consentimiento de uso de datos y muestra solo documentos configurados", async () => {
   const html = await readFile(new URL("../dist/checkout.html", import.meta.url), "utf8");
-  const code = await readFile(new URL("../dist/checkout.js", import.meta.url), "utf8");
   const consent = html.match(/<input\b[^>]*name="consent"[^>]*>[\s\S]*?<\/label\s*>/)?.[0];
   assert.ok(consent); assert.match(consent, /\brequired\b/);
   assert.match(consent, /datos[\s\S]*gestionar/i); assert.doesNotMatch(consent, /he leído/i);
@@ -71,24 +70,8 @@ test("Checkout: abre el formulario con consentimiento de uso de datos y muestra 
     { privacyUrl: privacy, termsUrl: "" },
     { privacyUrl: "", termsUrl: terms },
   ]) {
-    // Execute the real checkout initialization with a small DOM double so the
-    // assertions cover the rendered form and links, not a specific assignment.
-    const nodes = new Map([...html.matchAll(/<([a-z]+)\b([^>]*\bid="([^"]+)"[^>]*)>/g)].map(([, , attrs, id]) => ["#" + id, {
-      hidden: /\bhidden\b/.test(attrs), href: attrs.match(/\bhref="([^"]*)"/)?.[1] ?? "",
-      addEventListener() {}, append() {},
-    }]));
-    const storage = new Map([["offcode-bag", JSON.stringify([{ size: "M", qty: 1 }])]]);
-    await vm.runInNewContext(code, {
-      URL,
-      document: { querySelector: (selector) => nodes.get(selector), createElement: () => ({}) },
-      sessionStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
-      crypto: { randomUUID: () => "12345678-1234-4234-8234-123456789abc" },
-      fetch: async (route) => {
-        assert.equal(route, "/api/config");
-        return { ok: true, json: async () => ({ enabled: true, unitCents: 165000,
-          product: { saleSizes: ["M"] }, shipping: { enabled: false }, ...urls }) };
-      },
-    });
+    const { nodes } = await checkoutDom({ enabled: true, unitCents: 165000,
+      product: { saleSizes: ["M"] }, shipping: { enabled: false }, ...urls });
     assert.equal(nodes.get("#order-form").hidden, false, "las URLs vacías no impiden abrir el formulario");
     for (const [id, url, fallback] of [["#privacy-link", urls.privacyUrl, "aviso-de-privacidad.html"], ["#terms-link", urls.termsUrl, "condiciones-de-compra.html"]]) {
       const link = nodes.get(id);
