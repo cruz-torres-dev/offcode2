@@ -122,7 +122,7 @@ test("Checkout: sin integración pública no se muestran tarifas ficticias ni se
   } finally { await app.close(); }
 });
 
-async function pageWithRates({ rateDelay, quoteExpiry = 60000, onOrder } = {}) {
+async function pageWithRates({ rateDelay, quoteExpiry = 60000, onOrder, onQuote } = {}) {
   const app = await checkoutApp(), config = (await app.call("/api/config")).data;
   const quoted = (await app.quote()).data;
   const now = Date.now();
@@ -131,6 +131,7 @@ async function pageWithRates({ rateDelay, quoteExpiry = 60000, onOrder } = {}) {
     if (route === "/api/orders") return onOrder?.(JSON.parse(options.body)) ?? { ok: false, status: 409, json: async () => ({ error: "La cotización venció." }) };
     assert.equal(route, "/api/shipping/rates");
     if (rateDelay) await rateDelay;
+    if (onQuote) return onQuote(quoted, JSON.parse(options.body));
     return { ok: true, json: async () => quoted };
   } });
   Object.assign(page.fields.consent, { checked: true });
@@ -148,18 +149,142 @@ test("Checkout visible: dos servicios actualizan el total del servidor y exigen 
     assert.equal(page.nodes.get("#submit-order").disabled, true);
     page.nodes.get("#accept-total").checked = true; page.nodes.get("#accept-total").onchange();
     assert.equal(page.nodes.get("#submit-order").disabled, false);
-    radios[1].onchange();
-    assert.equal(page.nodes.get("#shipping-rates").children.length, 0);
-    assert.equal(page.nodes.get("#accept-total").checked, false);
-    await page.nodes.get("#quote-shipping").onclick();
-    page.nodes.get("#shipping-rates").children[1].children[0].onchange();
-    assert.match(page.nodes.get("#review-total").textContent, /1,910\.00/);
-    assert.equal(page.nodes.get("#accept-total").checked, false);
-    assert.equal(page.nodes.get("#submit-order").disabled, true);
+    for (const index of [1, 0, 1, 0, 1, 0]) {
+      radios[index].onchange();
+      assert.equal(page.nodes.get("#shipping-rates").children.length, 2, "alternar no borra los servicios vigentes");
+      assert.equal(page.nodes.get("#summary-shipping").textContent, index ? "$260.00" : "$185.20");
+      assert.equal(page.nodes.get("#review-total").textContent, index ? "$1,910.00" : "$1,835.20");
+      assert.equal(page.nodes.get("#accept-total").checked, false, "el total del otro servicio no sigue aceptado");
+      assert.equal(page.nodes.get("#submit-order").disabled, true);
+      page.nodes.get("#accept-total").checked = true; page.nodes.get("#accept-total").onchange();
+      assert.equal(page.nodes.get("#submit-order").disabled, false);
+    }
+    assert.equal(page.requests.filter(request => request.route === "/api/shipping/rates").length, 1);
     assert.equal(quoted.rates[1].deliveryEstimate, "");
     page.advance(61000);
     assert.match(page.nodes.get("#shipping-message").textContent, /venció/);
     assert.equal(page.nodes.get("#summary-total").textContent, "Por calcular");
+  } finally { await app.close(); }
+});
+
+test("Checkout visible: caducidad impide enviar aunque se reactive el checkbox o un radio retirado", async () => {
+  const { app, page } = await pageWithRates();
+  try {
+    await page.nodes.get("#quote-shipping").onclick();
+    const radio = page.nodes.get("#shipping-rates").children[0].children[0];
+    radio.onchange();
+    page.nodes.get("#accept-total").checked = true; page.nodes.get("#accept-total").onchange();
+    page.advance(61000);
+    radio.onchange();
+    assert.equal(page.nodes.get("#shipping-rates").children.length, 0);
+    assert.equal(page.nodes.get("#summary-total").textContent, "Por calcular");
+    page.nodes.get("#accept-total").checked = true;
+    page.nodes.get("#order-form").emit("submit"); await page.flush();
+    assert.equal(page.requests.filter(request => request.route === "/api/orders").length, 0);
+    assert.equal(page.nodes.get("#submit-order").disabled, true);
+    assert.deepEqual((await app.snapshot()).orders, []);
+    assert.equal(app.provider.generateCalls, 0);
+  } finally { await app.close(); }
+});
+
+test("Checkout visible: error HTTP, red, JSON inválido o sin cobertura permiten recalcular sin tarifas residuales", async () => {
+  const errors = [
+    () => ({ ok: false, status: 503, json: async () => ({ error: "Envia no disponible. Reintenta." }) }),
+    () => { throw Error("Fallo de red simulado"); },
+    () => ({ ok: true, json: async () => { throw Error("JSON inválido simulado"); } }),
+    () => ({ ok: true, json: async () => ({ rates: [] }) }),
+  ];
+  let attempt = 0;
+  const { app, page } = await pageWithRates({ onQuote: quoted => attempt < errors.length ? errors[attempt++]()
+    : { ok: true, json: async () => quoted } });
+  try {
+    for (const message of [/Envia no disponible/, /Fallo de red/, /JSON inválido/, /no devolvió servicios/]) {
+      await page.nodes.get("#quote-shipping").onclick();
+      assert.match(page.nodes.get("#shipping-message").textContent, message);
+      assert.equal(page.nodes.get("#quote-shipping").disabled, false);
+      assert.equal(page.nodes.get("#shipping-rates").children.length, 0);
+      assert.equal(page.nodes.get("#accept-total").checked, false);
+      assert.equal(page.nodes.get("#summary-total").textContent, "Por calcular");
+      assert.equal(page.nodes.get("#submit-order").disabled, true);
+    }
+    await page.nodes.get("#quote-shipping").onclick();
+    const rows = page.nodes.get("#shipping-rates").children;
+    assert.equal(rows.length, 2);
+    rows[0].children[0].onchange(); rows[1].children[0].onchange();
+    assert.equal(page.nodes.get("#summary-total").textContent, "$1,910.00");
+    assert.equal(page.nodes.get("#accept-total").checked, false);
+    assert.equal(page.requests.filter(request => request.route === "/api/orders").length, 0);
+  } finally { await app.close(); }
+});
+
+test("Checkout visible: respuestas y errores antiguos no reemplazan tarifas ni quitan la carga de la petición nueva", async () => {
+  for (const order of ["old-first", "new-first", "old-error-after-new"]) {
+    const pending = [];
+    const { app, page, quoted } = await pageWithRates({ onQuote: () => new Promise((resolve, reject) => pending.push({ resolve, reject })) });
+    const response = data => ({ ok: true, json: async () => data });
+    const latest = { ...quoted, rates: quoted.rates.map(rate => ({ ...rate, id: randomUUID() })) };
+    const button = page.nodes.get("#quote-shipping");
+    try {
+      const olderRequest = button.onclick();
+      assert.equal(button.disabled, true);
+      assert.equal(button.attrs["aria-busy"], "true");
+      page.fields.postalCode.value = "37001"; page.nodes.get("#order-form").emit("input", page.fields.postalCode);
+      assert.equal(button.disabled, false, "una nueva dirección permite recalcular sin esperar la respuesta obsoleta");
+      const newerRequest = button.onclick();
+      assert.equal(button.disabled, true);
+      assert.match(page.nodes.get("#shipping-message").textContent, /Consultando/);
+      if (order === "old-first") {
+        pending[0].resolve(response(quoted)); await olderRequest;
+        assert.equal(button.disabled, true, "el finally antiguo no habilita el botón de la petición nueva");
+        assert.equal(button.attrs["aria-busy"], "true");
+        assert.match(button.textContent, /Calculando/);
+        assert.equal(page.nodes.get("#shipping-rates").children.length, 0);
+      }
+      pending[1].resolve(response(latest)); await newerRequest;
+      const rows = page.nodes.get("#shipping-rates").children;
+      assert.deepEqual(rows.map(row => row.children[0].value), latest.rates.map(rate => rate.id));
+      rows[0].children[0].onchange();
+      page.nodes.get("#accept-total").checked = true; page.nodes.get("#accept-total").onchange();
+      if (order !== "old-first") {
+        if (order === "old-error-after-new") pending[0].reject(Error("Respuesta antigua fallida"));
+        else pending[0].resolve(response(quoted));
+        await olderRequest;
+      }
+      assert.deepEqual(page.nodes.get("#shipping-rates").children.map(row => row.children[0].value), latest.rates.map(rate => rate.id));
+      assert.equal(page.nodes.get("#accept-total").checked, true);
+      assert.equal(page.nodes.get("#summary-total").textContent, "$1,835.20");
+      assert.equal(button.disabled, false);
+      assert.equal(button.attrs["aria-busy"], "false");
+      assert.doesNotMatch(page.nodes.get("#shipping-message").textContent, /antigua fallida|Consultando/);
+      assert.equal(page.requests.filter(request => request.route === "/api/orders").length, 0);
+    } finally {
+      for (const item of pending) item.resolve(response(quoted));
+      await app.close();
+    }
+  }
+});
+
+test("Checkout visible: radios de una cotización reemplazada o invalidada por el carrito no recuperan tarifas anteriores", async () => {
+  const { app, page } = await pageWithRates({ onQuote: quoted => ({ ok: true, json: async () => ({ ...quoted,
+    rates: quoted.rates.map(rate => ({ ...rate, id: randomUUID() })) }) }) });
+  try {
+    await page.nodes.get("#quote-shipping").onclick();
+    const oldRadio = page.nodes.get("#shipping-rates").children[0].children[0];
+    oldRadio.onchange();
+    await page.nodes.get("#quote-shipping").onclick();
+    const currentRadio = page.nodes.get("#shipping-rates").children[1].children[0];
+    currentRadio.onchange();
+    page.nodes.get("#accept-total").checked = true; page.nodes.get("#accept-total").onchange();
+    oldRadio.onchange();
+    assert.equal(page.nodes.get("#shipping-rates").children.length, 2);
+    assert.equal(page.nodes.get("#summary-total").textContent, "$1,910.00");
+    assert.equal(page.nodes.get("#accept-total").checked, true);
+    const qty = page.descendants(page.nodes.get("#order-items")).find(node => node.tag === "input");
+    qty.value = "2"; qty.oninput();
+    currentRadio.onchange();
+    assert.equal(page.nodes.get("#shipping-rates").children.length, 0);
+    assert.equal(page.nodes.get("#summary-total").textContent, "Por calcular");
+    assert.equal(page.nodes.get("#submit-order").disabled, true);
   } finally { await app.close(); }
 });
 

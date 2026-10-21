@@ -4,7 +4,7 @@ const form = $("#order-form");
 const acceptance = $("#accept-total");
 const transfer = $("#payment-transfer");
 const customerFields = ["name", "phone", "email", "street", "neighborhood", "postalCode", "city", "state", "notes"];
-let items = [], config, key, selectedRate = null, quoteRevision = 0, expiryTimer, orderReference = "", submitting = false;
+let items = [], config, key, selectedRate = null, currentQuote = null, quotePending = false, quoteRevision = 0, expiryTimer, orderReference = "", submitting = false;
 try {
   items = JSON.parse(sessionStorage.getItem("offcode-bag") || "[]");
   key = sessionStorage.getItem("offcode-request-key") || crypto.randomUUID();
@@ -40,13 +40,19 @@ function totals(subtotalCents, shippingCents, totalCents) {
   for (const id of ["summary-total", "review-total"]) $("#" + id).textContent = Number.isSafeInteger(totalCents) ? money(totalCents) : "Por calcular";
 }
 function updateSubmit() {
-  $("#submit-order").disabled = submitting || !config?.enabled || !config?.shipping?.enabled || !selectedRate ||
+  $("#submit-order").disabled = submitting || quotePending || !config?.enabled || !config?.shipping?.enabled || !selectedRate ||
     !acceptance.checked || !transfer.checked || Date.parse(selectedRate.expiresAt) <= Date.now();
 }
 function clearRates(message = "Completa tu dirección y pulsa Calcular envío.") {
   quoteRevision++;
   clearTimeout(expiryTimer);
-  selectedRate = null;
+  const wasPending = quotePending;
+  selectedRate = null; currentQuote = null; quotePending = false;
+  if (wasPending) {
+    const button = $("#quote-shipping");
+    button.disabled = submitting || !config?.enabled || !config?.shipping?.enabled;
+    button.textContent = "Calcular envío"; button.setAttribute("aria-busy", "false");
+  }
   $("#payment-section").hidden = true; transfer.disabled = true;
   acceptance.checked = false; acceptance.disabled = true;
   $("#accept-total-label").textContent = "Elige un servicio para revisar y aceptar el total completo.";
@@ -109,11 +115,13 @@ function renderItems(resolved = []) {
     $("#order-items").append(row);
   });
 }
-function selectRate(rate, snapshot) {
-  if (selectedRate && selectedRate.id !== rate.id) {
-    clearRates("Cambiaste el servicio. Vuelve a calcular el envío, elige la nueva tarifa y acepta el total."); return;
+function selectRate(rate, quote) {
+  // Switching services within the current response keeps both server quotes.
+  // Detached controls from an earlier response must never restore old rates.
+  if (quote !== currentQuote || quote.revision !== quoteRevision || !quote.rates.includes(rate)) return;
+  if (quote.snapshot !== customerFingerprint() || quote.bagSnapshot !== JSON.stringify(items)) {
+    clearRates("Tus datos cambiaron. Vuelve a calcular el envío."); return;
   }
-  if (snapshot !== customerFingerprint()) { clearRates("Tus datos cambiaron. Vuelve a calcular el envío."); return; }
   if (!Number.isSafeInteger(rate.totalCents) || !Number.isSafeInteger(rate.subtotalCents) || !Number.isSafeInteger(rate.shippingCents) ||
       rate.currency !== "MXN" || !Number.isFinite(Date.parse(rate.expiresAt)) || Date.parse(rate.expiresAt) <= Date.now()) {
     clearRates("La cotización no está vigente. Vuelve a calcular el envío."); return;
@@ -314,14 +322,20 @@ $("#quote-shipping").onclick = async () => {
   if (!validBag()) { $("#availability").textContent = "Revisa tu bolsa: máximo 99 prendas en total."; return; }
   clearRates();
   const revision = quoteRevision, snapshot = customerFingerprint(), bagSnapshot = JSON.stringify(items), button = $("#quote-shipping");
+  quotePending = true; updateSubmit();
   button.disabled = true; button.textContent = "Calculando envío…";
+  button.setAttribute("aria-busy", "true");
   $("#shipping-message").textContent = "Consultando cobertura y tarifas de FedEx…";
   try {
     const response = await fetch("/api/shipping/rates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customer: customer(), items, consent: true }) });
     const result = await response.json();
-    if (revision !== quoteRevision || snapshot !== customerFingerprint() || bagSnapshot !== JSON.stringify(items)) return;
+    if (revision !== quoteRevision) return;
+    if (snapshot !== customerFingerprint() || bagSnapshot !== JSON.stringify(items)) {
+      clearRates("Tus datos cambiaron. Vuelve a calcular el envío."); return;
+    }
     if (!response.ok) throw Error(result.error || "No pudimos calcular el envío.");
     if (!Array.isArray(result.rates) || !result.rates.length) throw Error("FedEx no devolvió servicios disponibles para esta dirección.");
+    const quote = currentQuote = { revision, snapshot, bagSnapshot, rates: result.rates };
     renderItems(result.items || []);
     for (const rate of result.rates) {
       const label = document.createElement("label"), radio = document.createElement("input"), info = document.createElement("span"), name = document.createElement("span"), price = document.createElement("span");
@@ -329,16 +343,22 @@ $("#quote-shipping").onclick = async () => {
       name.className = "shipping-service-name"; name.textContent = rate.description; info.append(name);
       if (rate.deliveryEstimate) { const estimate = document.createElement("span"); estimate.className = "shipping-estimate"; estimate.textContent = "Estimado: " + rate.deliveryEstimate; info.append(estimate); }
       price.className = "shipping-price"; price.textContent = money(rate.shippingCents);
-      radio.onchange = () => selectRate(rate, snapshot);
+      radio.onchange = () => selectRate(rate, quote);
       label.append(radio, info, price); $("#shipping-rates").append(label);
     }
     $("#shipping-message").textContent = "Elige un servicio para ver y aceptar tu total. Los tiempos mostrados son estimaciones de la paquetería.";
-  } catch (error) { if (revision === quoteRevision) $("#shipping-message").textContent = error.message; }
-  finally { button.disabled = false; button.textContent = "Calcular envío"; }
+  } catch (error) { if (revision === quoteRevision) clearRates(error.message || "No pudimos calcular el envío. Vuelve a intentarlo."); }
+  finally {
+    // A superseded request cannot finish the newer request's loading state.
+    if (revision === quoteRevision) {
+      quotePending = false; button.disabled = false; button.textContent = "Calcular envío";
+      button.setAttribute("aria-busy", "false"); updateSubmit();
+    }
+  }
 };
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (submitting || !config?.enabled || !config.shipping?.enabled) return;
+  if (submitting || quotePending || !config?.enabled || !config.shipping?.enabled) return;
   if (!selectedRate || Date.parse(selectedRate.expiresAt) <= Date.now()) { clearRates("La tarifa venció. Vuelve a calcular el envío."); return; }
   if (!acceptance.checked || !transfer.checked || !form.reportValidity()) return;
   submitting = true; updateSubmit();
